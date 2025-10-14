@@ -9,7 +9,7 @@
 #define DHTPIN 14
 #define DHTTYPE DHT11
 
-#define ANEMO_AO 33
+#define ANEMO_AO 16
 #define MQ2_DO 25
 #define MQ2_AO 35
 #define BUTTON_PIN 5
