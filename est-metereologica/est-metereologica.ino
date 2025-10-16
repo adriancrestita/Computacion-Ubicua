@@ -1,4 +1,3 @@
-// === LIBRERÍAS ====
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085.h>
@@ -7,13 +6,7 @@
 #include <Adafruit_SSD1306.h>
 #include <math.h> 
 
-// === MQTT JSON ===
-#include "Mqtt_Json/config.h"
-#include "Mqtt_Json/ESP32_Utils.hpp"
-#include "Mqtt_Json/ESP32_Utils_MQTT_Async.hpp"
-#include "Mqtt_Json/MQTT.hpp"
-
-// === DEFINICION DE PINES ===
+// === Pines definidos ===
 #define DHTPIN 14
 #define DHTTYPE DHT11
 
@@ -39,24 +32,31 @@ DHT dht(DHTPIN, DHTTYPE);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // === Variables de menú ===
-int menuIndex = 0;
+int menuIndex = 0; // 0 a 4 son sensores individuales, 5 será el Resumen.
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 300;
 bool lastButtonState = LOW;
 
 // === Umbrales (ajustables) ===
-// Umbrales para lectura analógica ADC (0-4095 en ESP32)
-const int MQ2_umbral_normal = 200; // Calidad aceptable
-const int MQ2_umbral_malo = 400;   // Calidad mala
-const int MQ2_umbral_horrible = 600; // Calidad peligrosa/horrible
+// Umbrales para MQ2 - BASE DE ~1400 ADC
+const int MQ2_umbral_base = 1400; // Valor de referencia en aire limpio
+const int MQ2_umbral_normal = 1500; 
+const int MQ2_umbral_malo = 1700;   
+const int MQ2_umbral_horrible = 1800; // Peligroso (Rojo)
 
+// Umbrales para Anemómetro
 const int anemo_umbral_normal = 200;
 const int anemo_umbral_malo = 400;
 
-// === Umbrales de Presión Atmosférica (en hPa) para el BMP180 ===
+// Umbrales de Presión Atmosférica (en hPa)
 const float P0 = 1013.25; 
 const float PRESION_ALTA_UMBRAL = 1025.0; 
 const float PRESION_BAJA_UMBRAL = 1000.0; 
+
+// === Umbrales de LUZ (BH1750) ===
+const float LUX_NORMAL_UMBRAL = 50.0;
+const float LUX_ALTO_UMBRAL = 300.0;
+const float LUX_OSCURIDAD_UMBRAL = 10.0;
 
 
 // === Declaración de funciones (para mantener el orden) ===
@@ -67,8 +67,11 @@ void showBH1750();
 void showAnemo_aux(int viento);
 void showMQ2_aux(int gasA, int gasD);
 float calcularAltitud(float P_medida, float P_referencia); 
-String getGasDetectado(int gasADC); // Nueva función
-String getCalidadAire(int gasADC);  // Nueva función
+String getGasDetectado(int gasADC); 
+String getCalidadAire(int gasADC); 
+
+// === NUEVA FUNCIÓN AUXILIAR ===
+void showResumen(); 
 
 // ===========================================
 
@@ -100,9 +103,6 @@ void setup() {
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
 
-  // NOTA: El sensor MQ-2 requiere un tiempo de precalentamiento. 
-  // La lectura inicial puede ser alta. Se recomienda esperar al menos 1-2 minutos
-  // después de encender la placa antes de confiar en las lecturas.
   Serial.println("✅ Sistema de sensores iniciado correctamente. Calentando MQ-2...");
   delay(2000); 
 }
@@ -113,7 +113,8 @@ void loop() {
   if (buttonState != lastButtonState) {
     if (buttonState == HIGH && (millis() - lastDebounceTime) > debounceDelay) {
       menuIndex++;
-      if (menuIndex > 4) menuIndex = 0;
+      // MODIFICADO: Ahora el menú va hasta 5 (Resumen)
+      if (menuIndex > 5) menuIndex = 0; 
       lastDebounceTime = millis();
     }
   }
@@ -129,8 +130,10 @@ void loop() {
   int gasD = digitalRead(MQ2_DO);
 
   // === Determinar estado ===
-  int estado = 0;   // 0 = normal, 1 = malo, 2 = horrible
+  // estado: 0=Normal/Verde, 1=Malo/Blanco, 2=Horrible/Buzzer
+  int estado = 0;   
 
+  // El estado de alerta debe calcularse solo para la vista actual (menuIndex)
   switch (menuIndex) {
     case 0:   // DHT11
       if (isnan(temp) || isnan(hum)) {
@@ -147,9 +150,14 @@ void loop() {
       else estado = 0; 
       break;
       
-    case 2:   // BH1750
-      if (lux < 10) estado = 2;
-      else if (lux < 50) estado = 1;
+    case 2:   // BH1750 - LÓGICA DE 3 ESTADOS
+      if (lux >= LUX_ALTO_UMBRAL) {
+          estado = 1; // Mucha luz -> Estado 1 (LED Blanco)
+      } else if (lux >= LUX_NORMAL_UMBRAL) {
+          estado = 0; // Luz normal -> Estado 0 (LED Verde)
+      } else { 
+          estado = 2; // Poca luz / Oscuridad -> Estado 2 (Solo Buzzer)
+      }
       break;
       
     case 3:   // Anemómetro
@@ -157,16 +165,21 @@ void loop() {
       else if (viento > anemo_umbral_normal) estado = 1;
       break;
       
-    case 4:   // MQ2 - LÓGICA MODIFICADA PARA ESTADOS
-      if (gasA > MQ2_umbral_horrible) estado = 2; // Peligro extremo
-      else if (gasA > MQ2_umbral_malo) estado = 1; // Alerta de gas/humo
-      else estado = 0; 
+    case 4:   // MQ2 
+      if (gasA > MQ2_umbral_horrible) estado = 2; // Peligro extremo (Rojo)
+      else if (gasA > MQ2_umbral_malo) estado = 1; // Alerta de gas/humo (Amarillo)
+      else if (gasA > MQ2_umbral_normal) estado = 0; // Calidad Normal (Verde)
+      else estado = 0; // Calidad Buena/Base (Verde)
+      break;
+
+    case 5: // Resumen (No tiene lógica de alerta directa, usa la lógica predeterminada 'estado=0')
+      estado = 0;
       break;
       
   }
 
   // === Control de LED y buzzer ===
-  handleAlert(estado);
+  handleAlert(estado); 
 
   // === Mostrar pantalla ===
   display.clearDisplay();
@@ -174,9 +187,10 @@ void loop() {
   switch (menuIndex) {
     case 0: showDHT_aux(temp, hum); break;
     case 1: showBMP(); break;
-    case 2: showBH1750(); break;
+    case 2: showBH1750(); break; 
     case 3: showAnemo_aux(viento); break;
-    case 4: showMQ2_aux(gasA, gasD); break; // Función de display modificada
+    case 4: showMQ2_aux(gasA, gasD); break;
+    case 5: showResumen(); break; // NUEVA VISTA DE RESUMEN
   }
   display.display();
 
@@ -185,19 +199,44 @@ void loop() {
 
 // === LED + buzzer según estado ===
 void handleAlert(int estado) {
-  if (estado == 0) {    // normal
+  
+  // LÓGICA ESPECIAL PARA EL BH1750 (menuIndex == 2)
+  if (menuIndex == 2) {
+      if (estado == 1) { 
+          // Mucha Luz (Blanco)
+          digitalWrite(LED_R, HIGH);
+          digitalWrite(LED_G, HIGH);
+          digitalWrite(LED_B, HIGH);
+          digitalWrite(BUZZER_PIN, LOW);
+          return;
+      } else if (estado == 2) {
+          // Poca Luz/Oscuridad (Solo Buzzer - NUNCA LED)
+          digitalWrite(LED_R, LOW);
+          digitalWrite(LED_G, LOW);
+          digitalWrite(LED_B, LOW);
+          tone(BUZZER_PIN, 1500, 100); // Pitar
+          return;
+      }
+      // El estado 0 se maneja abajo para el LED Verde
+  }
+  
+  // Lógica de alerta estándar (incluye el estado 0 del BH1750 y todos los estados de otros sensores):
+  if (estado == 0) {    
+    // Normal (o Luz Normal si menuIndex == 2) -> LED Verde
     digitalWrite(LED_R, LOW);
     digitalWrite(LED_G, HIGH);
     digitalWrite(LED_B, LOW);
     digitalWrite(BUZZER_PIN, LOW);
   } 
-  else if (estado == 1) {   // malo
+  else if (estado == 1) {   
+    // Malo (Amarillo/Naranja) - Para otros sensores
     digitalWrite(LED_R, HIGH);
     digitalWrite(LED_G, HIGH);
     digitalWrite(LED_B, LOW);
     if ((millis() / 1000) % 20 == 0) tone(BUZZER_PIN, 1000, 200);
   } 
-  else {    // horrible
+  else {    
+    // Horrible (Rojo) - Para otros sensores
     digitalWrite(LED_R, HIGH);
     digitalWrite(LED_G, LOW);
     digitalWrite(LED_B, LOW);
@@ -216,43 +255,32 @@ float calcularAltitud(float P_medida, float P_referencia) {
 
 /**
  * @brief Estima el gas con mayor presencia basándose en la sensibilidad del MQ-2.
- * @param gasADC Valor analógico del sensor MQ-2 (0-4095).
- * @return String Nombre del gas estimado.
  */
 String getGasDetectado(int gasADC) {
-    // NOTA: El MQ-2 es más sensible a GLP/Propano y Humo. 
-    // Esta es una SIMPLIFICACIÓN basada en rangos.
-    
-    // Si la lectura es muy alta, asumimos el gas más peligroso/sensible (GLP)
     if (gasADC >= MQ2_umbral_horrible) {
-        return "GLP/Propano (ALERTA)";
+        return "GLP/Propano"; 
     } 
-    // Si la lectura es moderada, podría ser humo o alcohol.
-    else if (gasADC > MQ2_umbral_malo) {
-        return "Humo / Alcohol";
+    else if (gasADC >= MQ2_umbral_malo) {
+        return "Humo";
     } 
-    // Si la lectura es aceptable (no es aire puro, pero está bajo)
-    else if (gasADC > MQ2_umbral_normal) {
-        return "Metano / CO leve";
+    else if (gasADC > MQ2_umbral_base) {
+        return "CO/Metano";
     }
-    // Aire limpio
-    return "Ninguno (Aire Limpio)";
+    return "Limpio";
 }
 
 /**
  * @brief Evalúa la calidad del aire basándose en la lectura analógica.
- * @param gasADC Valor analógico del sensor MQ-2 (0-4095).
- * @return String Calidad del aire (Buena, Normal, Mala, Peligrosa).
  */
 String getCalidadAire(int gasADC) {
     if (gasADC >= MQ2_umbral_horrible) {
-        return "Peligrosa";
+        return "PELIGROSA";
     } else if (gasADC >= MQ2_umbral_malo) {
-        return "Mala";
-    } else if (gasADC >= MQ2_umbral_normal) {
-        return "Normal";
+        return "MALA";
+    } else if (gasADC >= MQ2_umbral_base) {
+        return "NORMAL";
     } else {
-        return "Buena";
+        return "BUENA";
     }
 }
 
@@ -313,4 +341,44 @@ void showMQ2_aux(int gasA, int gasD) {
 
   // Imprimir Calidad Aproximada
   display.printf("Calidad: %s", getCalidadAire(gasA).c_str());
+}
+
+// === NUEVA FUNCIÓN DE RESUMEN ===
+void showResumen() {
+  // Lecturas frescas para el resumen
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  float pres = bmp.readPressure() / 100.0;
+  float lux = lightMeter.readLightLevel();
+  int viento = analogRead(ANEMO_AO);
+  int gasA = analogRead(MQ2_AO); 
+  
+  display.setTextSize(1);
+  display.println("ESTADO GENERAL (5/5)");
+  display.println("--------------------");
+
+  // Línea 1: T/H
+  if (isnan(temp) || isnan(hum)) {
+    display.println("T/H: ERROR");
+  } else {
+    display.printf("T: %.1f C | H: %.1f %%\n", temp, hum);
+  }
+
+  // Línea 2: Presión/Luz
+  display.printf("Pres: %.1f hPa\n", pres);
+  display.printf("Luz: %.0f lx\n", lux);
+
+  // Línea 3: Viento/Gas
+  display.printf("Viento: %d ADC\n", viento);
+  display.printf("Gas: %d ADC (%s)\n", gasA, getCalidadAire(gasA).c_str());
+  
+  // Línea 4: Espacio para Altitud o Mensaje
+  float altitud = calcularAltitud(pres, P0);
+  if (abs(altitud) < 5) { 
+      display.println("Alt: ~0 m");
+  } else {
+      display.printf("Alt: %.0f m\n", altitud);
+  }
+  
+  display.println("--------------------");
 }
