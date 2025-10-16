@@ -1,3 +1,4 @@
+// === LIBRERÍAS ====
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085.h>
@@ -6,7 +7,13 @@
 #include <Adafruit_SSD1306.h>
 #include <math.h> 
 
-// === Pines definidos ===
+// === MQTT JSON ===
+#include "Mqtt_Json/config.h"
+#include "Mqtt_Json/ESP32_Utils.hpp"
+#include "Mqtt_Json/ESP32_Utils_MQTT_Async.hpp"
+#include "Mqtt_Json/MQTT.hpp"
+
+// === DEFINICION DE PINES ===
 #define DHTPIN 14
 #define DHTTYPE DHT11
 
