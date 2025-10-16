@@ -32,7 +32,7 @@ DHT dht(DHTPIN, DHTTYPE);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // === Variables de menú ===
-int menuIndex = 0; // 0 a 4 son sensores individuales, 5 será el Resumen.
+int menuIndex = 5; // MODIFICADO: INICIALIZADO A 5 para la vista de Resumen.
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 300;
 bool lastButtonState = LOW;
@@ -113,7 +113,7 @@ void loop() {
   if (buttonState != lastButtonState) {
     if (buttonState == HIGH && (millis() - lastDebounceTime) > debounceDelay) {
       menuIndex++;
-      // MODIFICADO: Ahora el menú va hasta 5 (Resumen)
+      // Mantenemos el límite de 5, si es 6 (5+1), vuelve a 0 (DHT11)
       if (menuIndex > 5) menuIndex = 0; 
       lastDebounceTime = millis();
     }
@@ -172,8 +172,8 @@ void loop() {
       else estado = 0; // Calidad Buena/Base (Verde)
       break;
 
-    case 5: // Resumen (No tiene lógica de alerta directa, usa la lógica predeterminada 'estado=0')
-      estado = 0;
+    case 5: // Resumen (No tiene lógica de alerta directa)
+      estado = 0; // Por defecto: Verde (normal) para la vista general.
       break;
       
   }
@@ -190,7 +190,7 @@ void loop() {
     case 2: showBH1750(); break; 
     case 3: showAnemo_aux(viento); break;
     case 4: showMQ2_aux(gasA, gasD); break;
-    case 5: showResumen(); break; // NUEVA VISTA DE RESUMEN
+    case 5: showResumen(); break; 
   }
   display.display();
 
@@ -343,7 +343,7 @@ void showMQ2_aux(int gasA, int gasD) {
   display.printf("Calidad: %s", getCalidadAire(gasA).c_str());
 }
 
-// === NUEVA FUNCIÓN DE RESUMEN ===
+// === FUNCIÓN DE RESUMEN ===
 void showResumen() {
   // Lecturas frescas para el resumen
   float temp = dht.readTemperature();
