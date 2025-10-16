@@ -100,9 +100,13 @@ void loop() {
   int estado = 0;  // 0 = normal, 1 = malo, 2 = horrible
 
   switch (menuIndex) {
-    case 0:  // MQ2
-      if (gasA > MQ2_umbral_malo) estado = 2;
-      else if (gasA > MQ2_umbral_normal) estado = 1;
+    case 0:  // DHT11
+      if (isnan(temp) || isnan(hum)) {
+        estado = 2;
+      } else {
+        if (hum > 80 || temp > 40) estado = 2;
+        else if (hum > 60 || temp > 30) estado = 1;
+      }
       break;
     case 1:  // BMP
       if (pres < 950) estado = 2;
@@ -116,14 +120,11 @@ void loop() {
       if (viento > anemo_umbral_malo) estado = 2;
       else if (viento > anemo_umbral_normal) estado = 1;
       break;
-    case 4:  // DHT11
-      if (isnan(temp) || isnan(hum)) {
-        estado = 2;
-      } else {
-        if (hum > 80 || temp > 40) estado = 2;
-        else if (hum > 60 || temp > 30) estado = 1;
-      }
+    case 4:  // MQ2
+      if (gasA > MQ2_umbral_malo) estado = 2;
+      else if (gasA > MQ2_umbral_normal) estado = 1;
       break;
+    
   }
 
   // === Control de LED y buzzer ===
@@ -133,11 +134,12 @@ void loop() {
   display.clearDisplay();
   display.setCursor(0, 0);
   switch (menuIndex) {
-    case 0: showMQ2_aux(gasA, gasD); break;
+    case 0: showDHT_aux(temp, hum); break;
     case 1: showBMP(); break;
     case 2: showBH1750(); break;
     case 3: showAnemo_aux(viento); break;
-    case 4: showDHT_aux(temp, hum); break;
+    case 4: showMQ2_aux(gasA, gasD); break;
+
   }
   display.display();
 
@@ -180,12 +182,12 @@ void showDHT_aux(float temp, float hum) {
 }
 
 void showBMP() {
-  float temp = bmp.readTemperature();
+  //float temp = bmp.readTemperature();
   float pres = bmp.readPressure() / 100.0;
   display.setTextSize(2);
   display.println("BMP180");
   display.setTextSize(1);
-  display.printf("Temp: %.1f C\n", temp);
+  //display.printf("Temp: %.1f C\n", temp);
   display.printf("Pres: %.1f hPa", pres);
 }
 
