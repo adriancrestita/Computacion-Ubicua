@@ -6,39 +6,39 @@
 #include <Adafruit_SSD1306.h>
 #include <math.h> 
 
-// === Pines definidos ===
+
+
+// === PINES DEFINIDOS ===
 #define DHTPIN 14
 #define DHTTYPE DHT11
-
 #define ANEMO_AO 16
 #define MQ2_DO 25
-#define MQ2_AO 35 // Pin analógico para el MQ2
+#define MQ2_AO 35 
 #define BUTTON_PIN 5
-
-// Pines para buzzer y LED RGB
 #define BUZZER_PIN 15
 #define LED_R 12
 #define LED_G 13
 #define LED_B 27
 
-// === Objetos de sensores ===
+// === OBJETOS DE SENSORES ===
 Adafruit_BMP085 bmp;
 BH1750 lightMeter;
 DHT dht(DHTPIN, DHTTYPE);
 
-// === Pantalla OLED ===
+// === PANTALLA OLED ===
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// === Variables de menú ===
-int menuIndex = 5; // MODIFICADO: INICIALIZADO A 5 para la vista de Resumen.
+// === VARIABLES INTERFAZ ===
+int menuIndex = 5; 
 unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 300;
 bool lastButtonState = LOW;
 
-// === Umbrales (ajustables) ===
-// Umbrales para MQ2 - BASE DE ~1400 ADC
+// === UMBRALES Y CONSTANTES ===
+
+// Umbrales para MQ2 
 const int MQ2_umbral_base = 1400; // Valor de referencia en aire limpio
 const int MQ2_umbral_normal = 1500; 
 const int MQ2_umbral_malo = 1700;   
@@ -58,23 +58,24 @@ const float LUX_NORMAL_UMBRAL = 50.0;
 const float LUX_ALTO_UMBRAL = 300.0;
 const float LUX_OSCURIDAD_UMBRAL = 10.0;
 
+// === Declaración de funciones ===
+void handleAlert(int estado); // Gestiona las alertas a emitir en función del estado
 
-// === Declaración de funciones (para mantener el orden) ===
-void handleAlert(int estado);
-void showDHT_aux(float temp, float hum);
-void showBMP();
-void showBH1750();
-void showAnemo_aux(int viento);
-void showMQ2_aux(int gasA, int gasD);
-float calcularAltitud(float P_medida, float P_referencia); 
-String getGasDetectado(int gasADC); 
-String getCalidadAire(int gasADC); 
+void showResumen(); // Muestra la pantalla inicial de información global
+void showDHT_aux(float temp, float hum); // muestra los valores del DHT11
+void showBMP(); // Muestra los valores del BMP180
+void showBH1750(); // Muestra los valores del BH1750
+void showAnemo_aux(int viento); // Muestra los valores obtenidos por el anemometro
+void showMQ2_aux(int gasA, int gasD); // Muestra los valores del MQ2
 
-// === NUEVA FUNCIÓN AUXILIAR ===
-void showResumen(); 
+float calcularAltitud(float P_medida, float P_referencia);  // Calcula la altitud a partir de la presión
+String getGasDetectado(int gasADC); // Comprueba a ver si hay algún gas inflamable en el ambiente
+String getCalidadAire(int gasADC); // Obtiene la calidad del aire segun un umbral de valores
 
-// ===========================================
+unsigned long lastPublish = 0; // Ultimo envio a MQTT
+const unsigned int intervaloEnvio = 5 * 1000; // Envio cada 5 segundos
 
+// === SET UP === 
 void setup() {
   Serial.begin(115200);
   Wire.begin(21, 22); // SDA, SCL
@@ -83,13 +84,13 @@ void setup() {
   dht.begin();
   lightMeter.begin();
   if (!bmp.begin()) {
-    Serial.println("❌ Error al iniciar BMP180");
+    Serial.println("Error al iniciar BMP180");
     while (1);
   }
 
   // Inicializar pantalla
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("❌ Error al iniciar pantalla OLED");
+    Serial.println("Error al iniciar pantalla OLED");
     while (1);
   }
   display.clearDisplay();
@@ -103,10 +104,17 @@ void setup() {
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
 
-  Serial.println("✅ Sistema de sensores iniciado correctamente. Calentando MQ-2...");
+  Serial.println("Sistema de sensores iniciado correctamente.");
   delay(2000); 
+
+  // Inicialización WIFI + MQTT
+  Serial.println("Conectando WiFi y Broker MQTT...");
+  Wifi.onEvent(WiFiEvent); 
+  InitMqtt(); // Define los callbacks y timers MQTT
+  ConnectWiFi_STA(true); // Conecta con IP estática definida en config.h
 }
 
+// === LOOP PRINCIPAL ===
 void loop() {
   // === Botón con antirrebote ===
   bool buttonState = digitalRead(BUTTON_PIN);
@@ -126,8 +134,8 @@ void loop() {
   float pres = bmp.readPressure() / 100.0; // Presión en hPa
   float lux = lightMeter.readLightLevel();
   int viento = analogRead(ANEMO_AO);
-  int gasA = analogRead(MQ2_AO); // Lectura analógica del MQ2
-  int gasD = digitalRead(MQ2_DO);
+  int gasA = analogRead(MQ2_AO); // Lectura analógica del MQ2 (valores incrementales segun calidad de gas)
+  int gasD = digitalRead(MQ2_DO); // Lectura digital (salida binaria si supera umbral puesto por potenciometro)
 
   // === Determinar estado ===
   // estado: 0=Normal/Verde, 1=Malo/Blanco, 2=Horrible/Buzzer
@@ -168,7 +176,6 @@ void loop() {
     case 4:   // MQ2 
       if (gasA > MQ2_umbral_horrible) estado = 2; // Peligro extremo (Rojo)
       else if (gasA > MQ2_umbral_malo) estado = 1; // Alerta de gas/humo (Amarillo)
-      else if (gasA > MQ2_umbral_normal) estado = 0; // Calidad Normal (Verde)
       else estado = 0; // Calidad Buena/Base (Verde)
       break;
 
@@ -194,7 +201,51 @@ void loop() {
   }
   display.display();
 
-  delay(300);
+
+  // Envio MQTT cada 5 segundos
+  if (millis() - lastPublish >= intervaloEnvio) {
+    lastPublish = millis();
+
+    float altitud = calcularAltitud(pres, P0);
+
+    StaticJsonDocument<512> json;
+
+    // Estructura con valor + unidad
+    JsonObject temperatura = json.createNestedObject("temperatura");
+    temperatura["valor"] = temp;
+    temperatura["unidad"] = "°C";
+
+    JsonObject humedad = json.createNestedObject("humedad");
+    humedad["valor"] = hum;
+    humedad["unidad"] = "%";
+
+    JsonObject presion = json.createNestedObject("presion");
+    presion["valor"] = pres;
+    presion["unidad"] = "hPa";
+
+    JsonObject luz = json.createNestedObject("luz");
+    luz["valor"] = lux;
+    luz["unidad"] = "lx";
+
+    JsonObject vientoObj = json.createNestedObject("viento");
+    vientoObj["valor"] = viento;
+    vientoObj["unidad"] = "ADC";
+
+    JsonObject gasObj = json.createNestedObject("gas");
+    gasObj["valor"] = gasA;
+
+    JsonObject altitudObj = json.createNestedObject("altitud");
+    altitudObj["valor"] = altitud;
+    altitudObj["unidad"] = "m";
+
+    String payload;
+    serializeJsonPretty(json, payload);
+
+    mqttClient.publish("estacion/datos", 0, true, payload.c_str()); // (tópido donde publicar, QoS, indica si el ultimo valor añadido debe guardarse como el último añadido, mensaje a enviar)
+
+    Serial.println("Publicado en MQTT:");
+    Serial.println(payload);
+  }
 }
 
 // === LED + buzzer según estado ===
@@ -245,16 +296,22 @@ void handleAlert(int estado) {
 }
 
 // === Funciones auxiliares ===
-
 /**
- * @brief Calcula la altitud aproximada (en metros).
+ * @brief Calcula la altitud aproximada (en metros)
+ *        usando la ecuación barométrica estándar (ISA).
+ * @param P_medida    Presión actual medida (hPa)
+ * @param P_referencia Presión de referencia a nivel del mar (hPa)
+ * @return Altitud estimada (m)
  */
 float calcularAltitud(float P_medida, float P_referencia) {
     return 44330.0 * (1.0 - pow((P_medida / P_referencia), 0.19029));
 }
 
 /**
- * @brief Estima el gas con mayor presencia basándose en la sensibilidad del MQ-2.
+ * @brief Estima el tipo de gas predominante según la sensibilidad del MQ-2.
+ *        Se basa en la respuesta típica del sensor frente a GLP, humo y CO/metano.
+ * @param gasADC Valor analógico leído (0-4095 en ESP32)
+ * @return String con el nombre del gas más probable detectado.
  */
 String getGasDetectado(int gasADC) {
     if (gasADC >= MQ2_umbral_horrible) {
@@ -263,14 +320,16 @@ String getGasDetectado(int gasADC) {
     else if (gasADC >= MQ2_umbral_malo) {
         return "Humo";
     } 
-    else if (gasADC > MQ2_umbral_base) {
+    else if (gasADC >= MQ2_umbral_base) {
         return "CO/Metano";
     }
     return "Limpio";
 }
 
 /**
- * @brief Evalúa la calidad del aire basándose en la lectura analógica.
+ * @brief Evalúa la calidad del aire basándose en el valor analógico del MQ-2.
+ * @param gasADC Valor analógico del sensor MQ-2 (0-4095)
+ * @return String con la clasificación de la calidad del aire.
  */
 String getCalidadAire(int gasADC) {
     if (gasADC >= MQ2_umbral_horrible) {
@@ -284,6 +343,9 @@ String getCalidadAire(int gasADC) {
     }
 }
 
+/**
+ * @brief Muestra temperatura y humedad del DHT11.
+ */
 void showDHT_aux(float temp, float hum) {
   display.setTextSize(2);
   display.println("DHT11");
@@ -296,9 +358,13 @@ void showDHT_aux(float temp, float hum) {
   }
 }
 
+/**
+ * @brief Muestra presión atmosférica (hPa) y altitud (m)
+ *        a partir del sensor BMP180.
+ */
 void showBMP() {
   float pres = bmp.readPressure() / 100.0; // Presión en hPa
-  float altitud = calcularAltitud(pres, P0); // Altitud aproximada en metros
+  float altitud = calcularAltitud(pres, P0); // Altitud en metros
 
   display.setTextSize(2);
   display.println("BMP180");
@@ -313,6 +379,10 @@ void showBMP() {
   }
 }
 
+/**
+ * @brief Muestra el nivel de luz ambiental (lux)
+ *        medido por el sensor BH1750.
+ */
 void showBH1750() {
   float lux = lightMeter.readLightLevel();
   display.setTextSize(2);
@@ -321,6 +391,10 @@ void showBH1750() {
   display.printf("Luz: %.1f lx", lux);
 }
 
+/**
+ * @brief Muestra la lectura del anemómetro (valor ADC crudo).
+ *        Podría calibrarse más adelante para mostrar velocidad del viento.
+ */
 void showAnemo_aux(int viento) {
   display.setTextSize(2);
   display.println("Viento");
@@ -328,24 +402,34 @@ void showAnemo_aux(int viento) {
   display.printf("ADC: %d", viento);
 }
 
+/**
+ * @brief Muestra los valores del sensor MQ-2:
+ *        valor ADC, gas detectado y calidad del aire.
+ */
 void showMQ2_aux(int gasA, int gasD) {
   display.setTextSize(2);
   display.println("MQ2");
   display.setTextSize(1);
   
-  // Imprimir valor numérico
+  // Valor numérico
   display.printf("ADC: %d\n", gasA);
   
-  // Imprimir Gas Detectado
+  // Gas detectado
   display.printf("Gas: %s\n", getGasDetectado(gasA).c_str());
 
-  // Imprimir Calidad Aproximada
+  // Calidad del aire
   display.printf("Calidad: %s", getCalidadAire(gasA).c_str());
 }
 
-// === FUNCIÓN DE RESUMEN ===
+/**
+ * @brief Muestra un resumen general con todos los sensores.
+ *        Incluye temperatura, humedad, presión, luz, viento, gas y altitud.
+ */
 void showResumen() {
-  // Lecturas frescas para el resumen
+  // Limpiar pantalla antes de escribir
+  display.clearDisplay();
+
+  // Lecturas actualizadas
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
   float pres = bmp.readPressure() / 100.0;
@@ -357,22 +441,22 @@ void showResumen() {
   display.println("ESTADO GENERAL (5/5)");
   display.println("--------------------");
 
-  // Línea 1: T/H
+  // Temperatura y humedad
   if (isnan(temp) || isnan(hum)) {
     display.println("T/H: ERROR");
   } else {
     display.printf("T: %.1f C | H: %.1f %%\n", temp, hum);
   }
 
-  // Línea 2: Presión/Luz
+  // Presión y luz
   display.printf("Pres: %.1f hPa\n", pres);
   display.printf("Luz: %.0f lx\n", lux);
 
-  // Línea 3: Viento/Gas
+  // Viento y gas
   display.printf("Viento: %d ADC\n", viento);
   display.printf("Gas: %d ADC (%s)\n", gasA, getCalidadAire(gasA).c_str());
   
-  // Línea 4: Espacio para Altitud o Mensaje
+  // Altitud
   float altitud = calcularAltitud(pres, P0);
   if (abs(altitud) < 5) { 
       display.println("Alt: ~0 m");
