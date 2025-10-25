@@ -1,6 +1,6 @@
 #pragma once
 
-const IPAddress MQTT_HOST(192, 168, 1, 150);
+const IPAddress MQTT_HOST(172, 29, 41, 88);
 const int MQTT_PORT = 1883;
 
 AsyncMqttClient mqttClient;
