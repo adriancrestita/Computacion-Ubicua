@@ -1,51 +1,93 @@
 #pragma once
 
-const IPAddress MQTT_HOST(172, 29, 41, 88);
-const int MQTT_PORT = 1883;
+#include <Arduino.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+#include <cstring>
 
-AsyncMqttClient mqttClient;
+#include "config.h"
 
-String GetPayloadContent(char* data, size_t len)
+static WiFiClient mqttWifiClient;
+static PubSubClient mqttClient(mqttWifiClient);
+
+inline String BuildClientId()
 {
-	String content = "";
-	for(size_t i = 0; i < len; i++)
-	{
-		content.concat(data[i]);
-	}
-	return content;
+        if(strlen(MQTT_CLIENT_ID) > 0)
+        {
+                return MQTT_CLIENT_ID;
+        }
+
+        String clientId = "ESP32Client-";
+        clientId += String(millis(), HEX);
+        return clientId;
 }
 
-void SuscribeMqtt()
+inline void ConfigureMqttClient()
 {
-	uint16_t packetIdSub = mqttClient.subscribe("hello/world", 0);
-	Serial.print("Subscribing at QoS 2, packetId: ");
-	Serial.println(packetIdSub);
+        mqttClient.setServer(MQTT_HOST, MQTT_PORT);
 }
 
-void PublishMqtt()
+inline void SetMqttCallback(MQTT_CALLBACK_SIGNATURE)
 {
-	String payload = "";
-
-	StaticJsonDocument<300> jsonDoc;
-	jsonDoc["data"] = millis();
-	serializeJson(jsonDoc, payload);
-
-	mqttClient.publish("hello/world", 0, true, (char*)payload.c_str());
+        mqttClient.setCallback(callback);
 }
 
-void OnMqttReceived(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
+inline void SubscribeDefaultTopic()
 {
-	Serial.print("Received on ");
-	Serial.print(topic);
-	Serial.print(": ");
+        if(strlen(MQTT_TOPIC_SUB) == 0)
+        {
+                return;
+        }
 
-	String content = GetPayloadContent(payload, len);
+        mqttClient.subscribe(MQTT_TOPIC_SUB);
+}
 
-	StaticJsonDocument<200> doc;
-	DeserializationError error = deserializeJson(doc, content);
-	if(error) return;
+inline bool ConnectMqtt()
+{
+        Serial.print("Intentando conexión MQTT...");
 
-	unsigned long data = doc["data"];
-	Serial.print("Millis:");
-	Serial.println(data);
+        String clientId = BuildClientId();
+        bool connected = false;
+
+        if(strlen(MQTT_USER) > 0)
+        {
+                connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD);
+        }
+        else
+        {
+                connected = mqttClient.connect(clientId.c_str());
+        }
+
+        if(connected)
+        {
+                Serial.println("conectado");
+                SubscribeDefaultTopic();
+        }
+        else
+        {
+                Serial.print("falló, rc=");
+                Serial.println(mqttClient.state());
+        }
+
+        return connected;
+}
+
+inline bool PublishMqttMessage(const char* topic, const String& payload, bool retained = false)
+{
+        if(topic == nullptr || payload.length() == 0)
+        {
+                return false;
+        }
+
+        return mqttClient.publish(topic, payload.c_str(), retained);
+}
+
+inline bool PublishDefaultTopic(const String& payload, bool retained = false)
+{
+        if(strlen(MQTT_TOPIC_PUB) == 0)
+        {
+                return false;
+        }
+
+        return PublishMqttMessage(MQTT_TOPIC_PUB, payload, retained);
 }

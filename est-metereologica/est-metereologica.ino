@@ -8,10 +8,10 @@
 #include <math.h>
 
 // ====== MQTT/WiFi (tus utilidades) ======
-#include "Mqtt_Json/config.h"
-#include "Mqtt_Json/ESP32_Utils.hpp"
-#include "Mqtt_Json/ESP32_Utils_MQTT_Async.hpp"
-#include "Mqtt_Json/MQTT.hpp"
+#include "config.h"
+#include "ESP32_Utils.hpp"
+#include "ESP32_Utils_MQTT_Async.hpp"
+#include "MQTT.hpp"
 
 // ====== JSON + NTP (Madrid) ======
 #include "JsonBuilder.hpp"
@@ -112,7 +112,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
 
 // === PUBLICAR MQTT ===
 void publicarSensor(const char* topic, const String& payload) {
-  mqttClient.publish(topic, 0, true, payload.c_str());
+  PublishMqttMessage(topic, payload, true);
   Serial.printf("\n📡 Publicado en [%s]: %s\n", topic, payload.c_str());
 }
 
@@ -144,9 +144,10 @@ void setup() {
   Serial.println("Sistema iniciado correctamente.");
 
   // WiFi + MQTT
-  WiFi.onEvent(WiFiEvent);
+  ConnectWiFi_STA(true);
   InitMqtt();
-  mqttClient.onMessage(onMqttMessage);
+  mqttClient.setCallback(onMqttMessage);
+  EnsureMqttConnection();
 
   // Suscribirse a todos los topics
   mqttClient.subscribe("estacion/temperatura");
@@ -155,13 +156,13 @@ void setup() {
   mqttClient.subscribe("estacion/luz");
   mqttClient.subscribe("estacion/viento");
   mqttClient.subscribe("estacion/gas");
-
-  ConnectWiFi_STA(true);
   initTime();
 }
 
 // === LOOP ===
 void loop() {
+  HandleMqttLoop();
+
   unsigned long now = millis();
 
   // --- BOTONES ---
