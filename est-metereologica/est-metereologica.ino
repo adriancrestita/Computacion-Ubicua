@@ -51,15 +51,17 @@ unsigned long debounceDelay = 300;
 bool lastButtonBack = LOW;
 bool lastButtonNext = LOW;
 
-// === INTERVALOS MQTT ===
-const unsigned long INTERVAL_TEMP   = 60 * 1000;
-const unsigned long INTERVAL_HUM    = 5 * 60 * 1000;
-const unsigned long INTERVAL_PRES   = 60 * 60 * 1000;
-const unsigned long INTERVAL_LUZ    = 30 * 1000;
-const unsigned long INTERVAL_VIENTO = 30 * 1000;
-const unsigned long INTERVAL_GAS    = 60 * 1000;
+// === INTERVALO DE PUBLICACIÓN MQTT (MODIFICABLE) ===
+const unsigned long DEFAULT_MQTT_INTERVAL_MS = 60UL * 1000UL;  // 1 minuto
+unsigned long mqttPublishIntervalMs = DEFAULT_MQTT_INTERVAL_MS;
+unsigned long lastMqttPublish = 0;
 
-unsigned long lastTemp = 0, lastHum = 0, lastPres = 0, lastLuz = 0, lastViento = 0, lastGas = 0;
+const char* WEATHER_SENSOR_ID = "WS_001";
+const char* WEATHER_STREET_ID = "ST_1253";
+const double WEATHER_LATITUDE = 40.4094736;
+const double WEATHER_LONGITUDE = -3.6920903;
+const char* WEATHER_DISTRICT = "Centro";
+const char* WEATHER_NEIGHBORHOOD = "Universidad";
 
 // === VARIABLES MQTT RECIBIDAS ===
 float mqttTemp = NAN;
@@ -67,7 +69,10 @@ float mqttHum = NAN;
 float mqttPres = NAN;
 float mqttLuz = NAN;
 float mqttWindSpeed = NAN;
-float mqttGas = NAN;
+float mqttAltitude = NAN;
+String mqttAirQuality;
+String mqttTimestamp;
+unsigned long lastMqttDataUpdate = 0;
 
 // === PROTOTIPOS ===
 void handleAlert(int estado);
@@ -77,6 +82,9 @@ void showBH1750_MQTT();
 void showAnemo_aux_MQTT();
 void showMQ2_aux_MQTT();
 void showResumen_MQTT();
+bool updateMqttDataFromPayload(const String& payload);
+bool hasFreshMqttData();
+String formatTimestampForDisplay(const String& isoTimestamp);
 float calcularAltitud(float P_medida, float P_referencia);
 String getCalidadAire(int gasADC);
 
@@ -95,19 +103,18 @@ void measureWind() {
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   String msg;
   for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
-  DynamicJsonDocument doc(512);
-  if (deserializeJson(doc, msg)) return;
+  String topicStr(topic);
 
-  String t = String(topic);
+  if (topicStr != "estacion/weather") {
+    Serial.printf("📩 MQTT ignorado [%s]: %s\n", topic, msg.c_str());
+    return;
+  }
 
-  if (t == "estacion/temperatura") mqttTemp = doc["temperature_celsius"];
-  else if (t == "estacion/humedad") mqttHum = doc["humidity_percent"];
-  else if (t == "estacion/presion") mqttPres = doc["atmospheric_pressure_hpa"];
-  else if (t == "estacion/luz") mqttLuz = doc["lx"];
-  else if (t == "estacion/viento") mqttWindSpeed = doc["wind_speed_kmh"];
-  else if (t == "estacion/gas") mqttGas = doc["air_quality_index"];
-
-  Serial.printf("📩 MQTT [%s]: %s\n", topic, msg.c_str());
+  if (updateMqttDataFromPayload(msg)) {
+    Serial.printf("📩 MQTT [%s]: %s\n", topic, msg.c_str());
+  } else {
+    Serial.printf("⚠️ Error al procesar MQTT [%s]: %s\n", topic, msg.c_str());
+  }
 }
 
 // === PUBLICAR MQTT ===
@@ -149,13 +156,8 @@ void setup() {
   mqttClient.setCallback(onMqttMessage);
   EnsureMqttConnection();
 
-  // Suscribirse a todos los topics
-  mqttClient.subscribe("estacion/temperatura");
-  mqttClient.subscribe("estacion/humedad");
-  mqttClient.subscribe("estacion/presion");
-  mqttClient.subscribe("estacion/luz");
-  mqttClient.subscribe("estacion/viento");
-  mqttClient.subscribe("estacion/gas");
+  // Suscribirse al topic unificado
+  mqttClient.subscribe("estacion/weather");
   initTime();
 }
 
@@ -187,35 +189,34 @@ void loop() {
   int gasA = analogRead(MQ2_AO);
   float altitud = calcularAltitud(pres, 1013.25);
 
-  if (now - lastTemp >= INTERVAL_TEMP) {
-    lastTemp = now;
-    publicarSensor("estacion/temperatura", buildSensorJsonFor("TEMP_001","temperature","ST_001",40.416775,-3.703790,altitud,"temperature_celsius",temp));
-  }
-
-  if (now - lastHum >= INTERVAL_HUM) {
-    lastHum = now;
-    publicarSensor("estacion/humedad", buildSensorJsonFor("HUM_001","humidity","ST_001",40.416775,-3.703790,altitud,"humidity_percent",hum));
-  }
-
-  if (now - lastPres >= INTERVAL_PRES) {
-    lastPres = now;
-    publicarSensor("estacion/presion", buildSensorJsonFor("PRES_001","pressure","ST_001",40.416775,-3.703790,altitud,"atmospheric_pressure_hpa",pres));
-  }
-
-  if (now - lastLuz >= INTERVAL_LUZ) {
-    lastLuz = now;
-    publicarSensor("estacion/luz", buildSensorJsonFor("LIGHT_001","light","ST_001",40.416775,-3.703790,altitud,"lx",lux));
-  }
-
-  if (now - lastViento >= INTERVAL_VIENTO) {
-    lastViento = now;
+  if (now - lastMqttPublish >= mqttPublishIntervalMs) {
+    lastMqttPublish = now;
     measureWind();
-    publicarSensor("estacion/viento", buildSensorJsonFor("WIND_001","wind","ST_001",40.416775,-3.703790,altitud,"wind_speed_kmh",WindSpeed));
-  }
+    float windSpeed = WindSpeed;
+    String calidadAire = getCalidadAire(gasA);
 
-  if (now - lastGas >= INTERVAL_GAS) {
-    lastGas = now;
-    publicarSensor("estacion/gas", buildSensorJsonFor("GAS_001","air_quality","ST_001",40.416775,-3.703790,altitud,"air_quality_index",gasA));
+    String payload = buildWeatherStationJson(
+      WEATHER_SENSOR_ID,
+      WEATHER_STREET_ID,
+      WEATHER_LATITUDE,
+      WEATHER_LONGITUDE,
+      altitud,
+      WEATHER_DISTRICT,
+      WEATHER_NEIGHBORHOOD,
+      temp,
+      hum,
+      windSpeed,
+      lux,
+      pres,
+      calidadAire
+    );
+
+    publicarSensor("estacion/weather", payload);
+
+    // Reutiliza el mismo flujo de parseo que los mensajes entrantes.
+    if (!updateMqttDataFromPayload(payload)) {
+      Serial.println("⚠️ No se pudo actualizar el estado local con el JSON enviado.");
+    }
   }
 
   // --- PANTALLA OLED ---
@@ -259,7 +260,10 @@ void showBMP_MQTT() {
   display.setTextSize(2); display.println("BMP180");
   display.setTextSize(1);
   if (isnan(mqttPres)) display.println("Sin datos MQTT");
-  else display.printf("Pres: %.1f hPa\n", mqttPres);
+  else {
+    display.printf("Pres: %.1f hPa\n", mqttPres);
+    if (!isnan(mqttAltitude)) display.printf("Alt : %.1f m", mqttAltitude);
+  }
 }
 
 void showBH1750_MQTT() {
@@ -282,10 +286,10 @@ void showAnemo_aux_MQTT() {
 void showMQ2_aux_MQTT() {
   display.setTextSize(2); display.println("MQ2");
   display.setTextSize(1);
-  if (isnan(mqttGas)) display.println("Sin datos MQTT");
+  if (mqttAirQuality.isEmpty()) display.println("Sin datos MQTT");
   else {
-    display.printf("MQTT: %.0f\n", mqttGas);
-    display.printf("Calidad: %s", getCalidadAire((int)mqttGas).c_str());
+    display.println("Calidad aire:");
+    display.println(mqttAirQuality);
   }
 }
 
@@ -293,11 +297,63 @@ void showResumen_MQTT() {
   display.setTextSize(1);
   display.println("RESUMEN MQTT");
   display.println("--------------------");
+  if (!hasFreshMqttData()) {
+    display.println("Esperando datos\nMQTT...");
+    return;
+  }
+
   display.printf("Temp: %.1f C\n", mqttTemp);
   display.printf("Hum : %.1f %%\n", mqttHum);
   display.printf("Pres: %.1f hPa\n", mqttPres);
   display.printf("Luz : %.1f lx\n", mqttLuz);
   display.printf("Viento: %.1f km/h\n", mqttWindSpeed);
-  display.printf("Gas: %.0f (%s)\n", mqttGas, getCalidadAire((int)mqttGas).c_str());
+  if (mqttAirQuality.isEmpty()) display.println("Gas: N/D");
+  else display.printf("Gas: %s\n", mqttAirQuality.c_str());
+  if (!mqttTimestamp.isEmpty()) {
+    display.println("--------------------");
+    display.println("Ult. MQTT:");
+    display.println(formatTimestampForDisplay(mqttTimestamp));
+  }
+  unsigned long ageSeconds = (millis() - lastMqttDataUpdate) / 1000UL;
   display.println("--------------------");
+  display.printf("Hace: %lus\n", ageSeconds);
+}
+
+bool updateMqttDataFromPayload(const String& payload) {
+  StaticJsonDocument<1024> doc;
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.printf("deserializeJson falló: %s\n", err.c_str());
+    return false;
+  }
+
+  JsonVariantConst data = doc["data"];
+  if (data.isNull()) return false;
+
+  mqttTemp = data["temperature_celsius"] | NAN;
+  mqttHum = data["humidity_percentage"] | NAN;
+  mqttPres = data["atmospheric_pressure_hpa"] | NAN;
+  mqttLuz = data["luz"] | NAN;
+  mqttWindSpeed = data["wind_speed"] | NAN;
+  const char* air = data["air_quality_index"] | "";
+  mqttAirQuality = String(air);
+
+  JsonVariantConst location = doc["location"];
+  mqttAltitude = location["altitude_meters"] | NAN;
+
+  const char* ts = doc["timestamp"] | "";
+  mqttTimestamp = String(ts);
+  lastMqttDataUpdate = millis();
+  return true;
+}
+
+bool hasFreshMqttData() {
+  return lastMqttDataUpdate != 0;
+}
+
+String formatTimestampForDisplay(const String& isoTimestamp) {
+  if (isoTimestamp.length() < 19) return isoTimestamp;
+  String datePart = isoTimestamp.substring(0, 10);
+  String timePart = isoTimestamp.substring(11, 19);
+  return datePart + " " + timePart;
 }
