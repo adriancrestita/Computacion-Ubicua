@@ -1,0 +1,21 @@
+{
+    "sensor_id": "WS_001",
+    "sensor_type": "weather",
+    "street_id" : "ST_1253",
+    "timestamp": [timestamp],
+    "location": {
+        "latitude": 40.4094736,
+        "longitude": -3.6920903,
+        "altitude_meters": [altitud],
+        "district": "Centro",
+        "neighborhood": "Universidad"
+    },
+    "data": {
+        "temperature_celsius": [temperatura],
+        "humidity_percentage": [humedad],
+        "wind_speed": [viento],
+        "luz": [lx],
+        "atmospheric_pressure_hpa": [presion],
+        "air_quality_index": [calidad_aire]
+    }
+}

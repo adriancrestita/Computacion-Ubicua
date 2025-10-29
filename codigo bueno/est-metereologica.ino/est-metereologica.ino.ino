@@ -12,7 +12,7 @@
 #include <AsyncTCP.h> 
 #include <AsyncMqttClient.h> 
 
-// === ARCHIVOS AUXILIARES (DEBEN ESTAR EN LA MISMA CARPETA) ===
+// === ARCHIVOS AUXILIARES ===
 #include "config.h" 
 #include "ESP32_Utils.hpp"
 #include "ESP32_Utils_MQTT_Async.hpp"
