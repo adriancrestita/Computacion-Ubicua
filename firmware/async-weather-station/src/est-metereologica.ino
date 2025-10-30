@@ -19,11 +19,11 @@
 #include <AsyncTCP.h>
 #include <AsyncMqttClient.h>
 
-#include "config.h"
-#include "ESP32_Utils.hpp"
-#include "ESP32_Utils_MQTT_Async.hpp"
-#include "MQTT.hpp"
-#include "JsonBuilder.hpp"
+#include "../config/config.h"
+#include "../include/ESP32_Utils.hpp"
+#include "../include/ESP32_Utils_MQTT_Async.hpp"
+#include "../include/MQTT.hpp"
+#include "../include/JsonBuilder.hpp"
 
 // Cliente MQTT principal
 AsyncMqttClient mqttClient;

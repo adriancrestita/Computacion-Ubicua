@@ -1,15 +1,15 @@
 #pragma once
 #include <WiFi.h>
-#include "config.h" // Necesario para obtener las macros WIFI_*
+#include <IPAddress.h>
 
-// Este archivo ASUME que las siguientes macros están definidas en config.h:
+// Este archivo ASUME que las siguientes macros están definidas en el archivo de configuración incluido por el sketch:
 // WIFI_SSID, WIFI_PASSWORD
 // WIFI_IP, WIFI_GATEWAY, WIFI_SUBNET (si se usa IP estática)
 
 void ConnectWiFi_STA(bool useStaticIP = false)
 {
    Serial.println("");
-   // Usamos las macros de config.h
+   // Usamos las macros definidas en el archivo de configuración
    WiFi.mode(WIFI_STA);
    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
    
@@ -39,7 +39,7 @@ void ConnectWiFi_AP(bool useStaticIP = false)
 { 
    Serial.println("");
    WiFi.mode(WIFI_AP);
-   // Usamos las macros de config.h
+   // Usamos las macros definidas en el archivo de configuración
    while(!WiFi.softAP(WIFI_SSID, WIFI_PASSWORD))
    {
      Serial.println(".");
