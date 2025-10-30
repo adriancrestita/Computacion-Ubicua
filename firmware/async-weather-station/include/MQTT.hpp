@@ -1,14 +1,13 @@
 #pragma once
 #include <AsyncMqttClient.h>
 #include <WiFi.h> // Necesario para IPAddress
-#include "config.h" // Necesario para las macros MQTT_HOST y MQTT_PORT
 
 // === DECLARACIONES GLOBALES ===
 // NOTA: mqttClient está definido en est-metereologica.ino
 extern AsyncMqttClient mqttClient;
 
 // === CONSTANTES DE CONEXIÓN ===
-// Usamos las macros de config.h para definir las constantes de IP
+// Usamos las macros definidas en el archivo de configuración del sketch para crear las constantes
 const IPAddress BROKER_IP(MQTT_HOST);
 const int BROKER_PORT = MQTT_PORT;
 
@@ -25,7 +24,7 @@ String GetPayloadContent(char* data, size_t len)
 
 void SuscribeMqtt()
 {
-	// Usamos MQTT_BASE_TOPIC, asumiendo que está definido en config.h
+        // Usamos MQTT_BASE_TOPIC, asumiendo que está definido en el archivo de configuración incluido por el sketch
 	uint16_t packetIdSub = mqttClient.subscribe(MQTT_BASE_TOPIC "/comandos", 0); 
 	Serial.print("Subscribing at QoS 0, packetId: ");
 	Serial.println(packetIdSub);
