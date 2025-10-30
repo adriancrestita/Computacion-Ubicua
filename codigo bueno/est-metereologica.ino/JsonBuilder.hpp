@@ -93,7 +93,7 @@ String buildSensorJsonFor(
   const char* data_key,
   double data_value,
   const char* district = "Centro",
-  const char* neighborhood = "Sol"
+  const char* neighborhood = "Universidad"
 ) {
   StaticJsonDocument<512> doc;
 
