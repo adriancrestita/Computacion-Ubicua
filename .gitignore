@@ -1,1 +1,26 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Icono personalizado del volumen (aparece en unidades externas)
+Icon
+
+# Archivos creados por el sistema en carpetas compartidas
+._*
+
+# Archivos temporales de macOS
+.Spotlight-V100
+.Trashes
+.fseventsd
+.VolumeIcon.icns
+
+# Archivos de Time Machine
+com.apple.timemachine.donotpresent
+
+# Archivos de sistema que pueden aparecer en volúmenes montados
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
