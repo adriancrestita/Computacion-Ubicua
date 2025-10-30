@@ -1,19 +1,19 @@
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef WEATHER_STATION_CONFIG_H
+#define WEATHER_STATION_CONFIG_H
 
 // --- WiFi ---
 #define WIFI_SSID       "MOVISTAR_8B3B"
 #define WIFI_PASSWORD   "sUYPsMoDVZERqVFi2xWj"
 
 // === DEFINICIONES DE IP ESTÁTICA (Necesarias para ESP32_Utils.hpp) ===
-#define WIFI_IP         192,168,1,200   
-#define WIFI_GATEWAY    192,168,1,1     
-#define WIFI_SUBNET     255,255,255,0   
+#define WIFI_IP         192,168,1,200
+#define WIFI_GATEWAY    192,168,1,1
+#define WIFI_SUBNET     255,255,255,0
 // ======================================================================
 
 // --- MQTT ---
 // IP de tu broker Mosquitto
-#define MQTT_HOST       192,168,56,1    
+#define MQTT_HOST       192,168,56,1
 #define MQTT_PORT       1883
 #define MQTT_USER       ""
 #define MQTT_PASSWORD   ""
@@ -25,4 +25,4 @@
 // --- Topics base (opcional) ---
 #define MQTT_BASE_TOPIC "estacion"
 
-#endif
+#endif  // WEATHER_STATION_CONFIG_H
