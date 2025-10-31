@@ -12,11 +12,11 @@
 #include <ArduinoJson.h>
 
 #include "../../config/config.h"
-#include "MQTT.hpp"
-#include "ESP32_Utils.hpp"
-#include "ESP32_Utils_MQTT_Async.hpp"
-#include "TimeUtils.hpp"
-#include "JsonBuilder.hpp"
+#include "../../include/MQTT.hpp"
+#include "../../include/ESP32_Utils.hpp"
+#include "../../include/ESP32_Utils_MQTT_Async.hpp"
+#include "../../include/TimeUtils.hpp"
+#include "../../include/JsonBuilder.hpp"
 
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
