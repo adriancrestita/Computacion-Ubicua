@@ -79,6 +79,8 @@ String buildWeatherStationJson(
 
   String json;
   serializeJson(doc, json);
+  Serial.println(F("[DEBUG] JSON generado:"));
+  Serial.println(json);
   return json;
 }
 
@@ -114,5 +116,7 @@ String buildSensorJsonFor(
 
   String json;
   serializeJson(doc, json);
+  Serial.println(F("[DEBUG] JSON generado:"));
+  Serial.println(json);
   return json;
 }

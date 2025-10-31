@@ -45,13 +45,33 @@ void WiFiEvent(WiFiEvent_t event)
         break;
     }
 }
-
+/*
 void OnMqttConnect(bool sessionPresent)
 {
     Serial.println("Connected to MQTT.");
     Serial.print("Session present: ");
     Serial.println(sessionPresent);
     SuscribeMqtt();
+}*/
+
+void OnMqttConnect(bool sessionPresent)
+{
+    Serial.println("✅ Conectado al broker MQTT");
+    Serial.print("Session present: ");
+    Serial.println(sessionPresent);
+
+    // Suscribirse a topics
+    SuscribeMqtt();
+
+    // Publicar un mensaje de inicio o prueba
+    const char* payload = "Estación MQTT conectada correctamente";
+    bool success = mqttClient.publish(MQTT_TOPIC, 1, false, payload);
+
+    if (success) {
+        Serial.println("📡 Payload publicado correctamente");
+    } else {
+        Serial.println("[WARN] No se pudo publicar el payload MQTT.");
+    }
 }
 
 void OnMqttDisconnect(AsyncMqttClientDisconnectReason reason)
