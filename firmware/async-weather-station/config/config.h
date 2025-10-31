@@ -5,12 +5,6 @@
 #define WIFI_SSID       "cubicua"
 #define WIFI_PASSWORD   ""
 
-// === DEFINICIONES DE IP ESTÁTICA (Necesarias para ESP32_Utils.hpp) ===
-#define WIFI_IP         192,168,1,200
-#define WIFI_GATEWAY    192,168,1,1
-#define WIFI_SUBNET     255,255,255,0
-// ======================================================================
-
 // --- MQTT ---
 // IP de tu broker Mosquitto (formato: 192,168,1,10)
 #define MQTT_HOST       172,22,92,67
@@ -26,7 +20,3 @@
 #define TIMEZONE        "Europe/Madrid"
 
 #endif  // WEATHER_STATION_CONFIG_H
-
-
-
-172.22.92.67
