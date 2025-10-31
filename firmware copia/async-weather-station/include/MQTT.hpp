@@ -1,51 +1,46 @@
 #pragma once
 
-const IPAddress MQTT_HOST(192, 168, 1, 150);
-const int MQTT_PORT = 1883;
+#include <Arduino.h>
+#include <AsyncMqttClient.h>
 
-AsyncMqttClient mqttClient;
+constexpr char MQTT_TOPIC[] = "sensors/street_1253/WT_001";
+
+extern AsyncMqttClient mqttClient;
 
 String GetPayloadContent(char* data, size_t len)
 {
-	String content = "";
-	for(size_t i = 0; i < len; i++)
-	{
-		content.concat(data[i]);
-	}
-	return content;
+        String content;
+        content.reserve(len);
+        for(size_t i = 0; i < len; i++)
+        {
+                content.concat(data[i]);
+        }
+        return content;
 }
 
 void SuscribeMqtt()
 {
-	uint16_t packetIdSub = mqttClient.subscribe("hello/world", 0);
-	Serial.print("Subscribing at QoS 2, packetId: ");
-	Serial.println(packetIdSub);
+        uint16_t packetIdSub = mqttClient.subscribe(MQTT_TOPIC, 1);
+        Serial.print("Subscribing to topic: ");
+        Serial.print(MQTT_TOPIC);
+        Serial.print(" at QoS 1, packetId: ");
+        Serial.println(packetIdSub);
 }
 
-void PublishMqtt()
+bool PublishMqtt(const String& payload)
 {
-	String payload = "";
+        if(!mqttClient.connected())
+        {
+                return false;
+        }
 
-	StaticJsonDocument<300> jsonDoc;
-	jsonDoc["data"] = millis();
-	serializeJson(jsonDoc, payload);
-
-	mqttClient.publish("hello/world", 0, true, (char*)payload.c_str());
+        mqttClient.publish(MQTT_TOPIC, 1, false, payload.c_str(), payload.length());
+        return true;
 }
 
-void OnMqttReceived(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
-{
-	Serial.print("Received on ");
-	Serial.print(topic);
-	Serial.print(": ");
-
-	String content = GetPayloadContent(payload, len);
-
-	StaticJsonDocument<200> doc;
-	DeserializationError error = deserializeJson(doc, content);
-	if(error) return;
-
-	unsigned long data = doc["data"];
-	Serial.print("Millis:");
-	Serial.println(data);
-}
+void OnMqttReceived(char* topic,
+                    char* payload,
+                    AsyncMqttClientMessageProperties properties,
+                    size_t len,
+                    size_t index,
+                    size_t total);

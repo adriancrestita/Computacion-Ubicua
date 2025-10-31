@@ -1,4 +1,5 @@
 #pragma once
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <time.h>
@@ -42,23 +43,27 @@ String getTimestampISO8601() {
  */
 String buildWeatherStationJson(
   const char* sensor_id,
+  const char* sensor_type,
   const char* street_id,
+  const char* district,
+  const char* neighborhood,
   double latitude,
   double longitude,
   double altitude,
-  const char* district,
-  const char* neighborhood,
   double temperature_celsius,
   double humidity_percentage,
   double wind_speed_kmh,
+  double wind_speed_ms,
   double light_lux,
   double atmospheric_pressure_hpa,
-  double air_quality_index
+  const String& air_quality_index,
+  int gas_adc_raw,
+  const String& device_ip
 ) {
-  StaticJsonDocument<768> doc;
+  StaticJsonDocument<896> doc;
 
   doc["sensor_id"] = sensor_id;
-  doc["sensor_type"] = "weather";
+  doc["sensor_type"] = sensor_type;
   doc["street_id"] = street_id;
   doc["timestamp"] = getTimestampISO8601();
 
@@ -72,10 +77,13 @@ String buildWeatherStationJson(
   JsonObject data = doc.createNestedObject("data");
   data["temperature_celsius"] = temperature_celsius;
   data["humidity_percentage"] = humidity_percentage;
-  data["wind_speed"] = wind_speed_kmh;
+  data["wind_speed_kmh"] = wind_speed_kmh;
+  data["wind_speed_ms"] = wind_speed_ms;
   data["luz"] = light_lux;
   data["atmospheric_pressure_hpa"] = atmospheric_pressure_hpa;
   data["air_quality_index"] = air_quality_index;
+  data["gas_adc_raw"] = gas_adc_raw;
+  data["device_ip"] = device_ip;
 
   String json;
   serializeJson(doc, json);
