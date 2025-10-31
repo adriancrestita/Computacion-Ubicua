@@ -59,9 +59,9 @@ constexpr int MQ2_umbral_malo = 1700;
 constexpr int MQ2_umbral_horrible = 1800;
 
 // === Identificadores de dispositivo ===
-constexpr char SENSOR_ID[] = "WT_001";
+constexpr char SENSOR_ID[] = "WS_001";
 constexpr char SENSOR_TYPE[] = "weather";
-constexpr char STREET_ID[] = "street_1253";
+constexpr char STREET_ID[] = "ST_1253";
 constexpr char DISTRICT[] = "Centro";
 constexpr char NEIGHBORHOOD[] = "Universidad";
 constexpr double LOCATION_LATITUDE = 40.4094736;
@@ -259,12 +259,9 @@ String buildSensorPayload(const SensorData& data) {
     data.temperatureC,
     data.humidityPercent,
     data.windSpeedKmh,
-    data.windSpeedMs,
     data.lightLux,
     data.pressureHpa,
-    data.gasQuality,
-    data.gasRaw,
-    WiFi.localIP().toString()
+    data.gasQuality
   );
 }
 
@@ -388,8 +385,8 @@ void OnMqttReceived(char* topic,
       if (data.containsKey("temperature_celsius")) {
         Serial.printf("Temp remota: %.2f °C\n", data["temperature_celsius"].as<float>());
       }
-      if (data.containsKey("wind_speed_kmh")) {
-        Serial.printf("Viento remoto: %.2f km/h\n", data["wind_speed_kmh"].as<float>());
+      if (data.containsKey("wind_speed")) {
+        Serial.printf("Viento remoto: %.2f km/h\n", data["wind_speed"].as<float>());
       }
     }
   }

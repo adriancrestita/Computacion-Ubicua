@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <AsyncMqttClient.h>
 
-constexpr char MQTT_TOPIC[] = "sensors/street_1253/WT_001";
+constexpr char MQTT_TOPIC[] = "sensors/ST_1253/WS_001";
 
 extern AsyncMqttClient mqttClient;
 

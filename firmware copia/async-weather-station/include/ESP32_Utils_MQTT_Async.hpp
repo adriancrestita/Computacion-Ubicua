@@ -1,5 +1,13 @@
 #pragma once
 
+#ifndef MQTT_HOST
+#define MQTT_HOST "test.mosquitto.org"
+#endif
+
+#ifndef MQTT_PORT
+#define MQTT_PORT 1883
+#endif
+
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
 
@@ -9,23 +17,24 @@ void ConnectToMqtt()
 	mqttClient.connect();
 }
 
-void WiFiEvent(WiFiEvent_t event)
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info)
 {
-	Serial.printf("[WiFi-event] event: %d\n", event);
-	switch(event)
-	{
-	case SYSTEM_EVENT_STA_GOT_IP:
-		Serial.println("WiFi connected");
-		Serial.println("IP address: ");
-		Serial.println(WiFi.localIP());
-		ConnectToMqtt();
-		break;
-	case SYSTEM_EVENT_STA_DISCONNECTED:
-		Serial.println("WiFi lost connection");
-		xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-		xTimerStart(wifiReconnectTimer, 0);
-		break;
-	}
+        Serial.printf("[WiFi-event] event: %d\n", event);
+        (void)info;
+        switch(event)
+        {
+        case IP_EVENT_STA_GOT_IP:
+                Serial.println("WiFi connected");
+                Serial.println("IP address: ");
+                Serial.println(WiFi.localIP());
+                ConnectToMqtt();
+                break;
+        case WIFI_EVENT_STA_DISCONNECTED:
+                Serial.println("WiFi lost connection");
+                xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+                xTimerStart(wifiReconnectTimer, 0);
+                break;
+        }
 }
 
 void OnMqttConnect(bool sessionPresent)

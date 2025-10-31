@@ -1,41 +1,8 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <WiFi.h>
-#include <time.h>
 
-// === CONFIGURACIÓN NTP PARA ZONA HORARIA DE MADRID ===
-#define NTP_SERVER "pool.ntp.org"
-#define TZ_INFO "CET-1CEST,M3.5.0/2,M10.5.0/3" // España/Madrid
-
-// === Inicializa la sincronización NTP ===
-void initTime() {
-  configTime(0, 0, NTP_SERVER);
-  setenv("TZ", TZ_INFO, 1);
-  tzset();
-
-  Serial.println("⏰ Sincronizando hora NTP...");
-  struct tm timeinfo;
-  while (!getLocalTime(&timeinfo)) {
-    Serial.print(".");
-    delay(500);
-  }
-  Serial.println("\n✅ Hora sincronizada correctamente (zona Madrid).");
-}
-
-// === Devuelve timestamp en formato ISO8601 ===
-String getTimestampISO8601() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    return "1970-01-01T00:00:00Z";
-  }
-
-  char buffer[30];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S%z", &timeinfo);
-  String ts(buffer);
-  if (ts.length() > 22) ts = ts.substring(0, 22) + ":" + ts.substring(22);
-  return ts;
-}
+#include "TimeUtils.hpp"
 
 /**
  * @brief Construye un JSON con toda la información de la estación
@@ -52,15 +19,12 @@ String buildWeatherStationJson(
   double altitude,
   double temperature_celsius,
   double humidity_percentage,
-  double wind_speed_kmh,
-  double wind_speed_ms,
+  double wind_speed,
   double light_lux,
   double atmospheric_pressure_hpa,
-  const String& air_quality_index,
-  int gas_adc_raw,
-  const String& device_ip
+  const String& air_quality_index
 ) {
-  StaticJsonDocument<896> doc;
+  StaticJsonDocument<768> doc;
 
   doc["sensor_id"] = sensor_id;
   doc["sensor_type"] = sensor_type;
@@ -77,13 +41,10 @@ String buildWeatherStationJson(
   JsonObject data = doc.createNestedObject("data");
   data["temperature_celsius"] = temperature_celsius;
   data["humidity_percentage"] = humidity_percentage;
-  data["wind_speed_kmh"] = wind_speed_kmh;
-  data["wind_speed_ms"] = wind_speed_ms;
+  data["wind_speed"] = wind_speed;
   data["luz"] = light_lux;
   data["atmospheric_pressure_hpa"] = atmospheric_pressure_hpa;
   data["air_quality_index"] = air_quality_index;
-  data["gas_adc_raw"] = gas_adc_raw;
-  data["device_ip"] = device_ip;
 
   String json;
   serializeJson(doc, json);
