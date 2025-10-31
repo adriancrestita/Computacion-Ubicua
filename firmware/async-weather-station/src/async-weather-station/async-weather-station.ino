@@ -3,27 +3,25 @@
  *  Descripción: Mide temperatura, humedad, presión, luz,
  *  velocidad del viento y calidad del aire.
  *  Muestra los datos en OLED, consola serial y los envía
- *  por WiFi (HTTP o MQTT/ThingSpeak).
- *  Autor: [Tu Nombre]
- *  Fecha: [Actualizar]
+ *  por MQTT cada 30 segundos.
  *  ======================================================
  */
 
+#include "../../config/config.h"
+
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <Wire.h>
+#include <AsyncMqttClient.h>
 #include <Adafruit_BMP085.h>
 #include <BH1750.h>
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
+#include <ArduinoJson.h>
 
-// === Configuración WiFi ===
-const char* ssid = "TuSSID";
-const char* password = "TuPASSWORD";
-
-// URL del servidor o endpoint ThingSpeak (opcional)
-String serverName = "http://api.thingspeak.com/update";
-String apiKey = "TU_API_KEY";  // si usas ThingSpeak
+#include "ESP32_Utils.hpp"
+#include "ESP32_Utils_MQTT_Async.hpp"
+#include "MQTT.hpp"
+#include "TimeUtils.hpp"
 
 // === Pines ===
 #define DHTPIN 14
@@ -38,11 +36,11 @@ String apiKey = "TU_API_KEY";  // si usas ThingSpeak
 #define ANEMO_PIN 17
 
 // === Configuración del anemómetro ===
-const int RecordTime = 3;                // Tiempo de muestreo (s)
-volatile int InterruptCounter = 0;       // Contador de interrupciones
-volatile unsigned long lastPulse = 0;    // Tiempo del último pulso (µs)
-float WindSpeed = 0.0;                   // Velocidad del viento en km/h
-const float ANEMO_FACTOR = 2.4;          // Factor de conversión a km/h
+constexpr int RecordTime = 3;                // Tiempo de muestreo (s)
+volatile int InterruptCounter = 0;           // Contador de interrupciones
+volatile unsigned long lastPulse = 0;        // Tiempo del último pulso (µs)
+float WindSpeed = 0.0f;                      // Velocidad del viento en km/h
+constexpr float ANEMO_FACTOR = 2.4f;         // Factor de conversión a km/h
 
 // === Sensores ===
 Adafruit_BMP085 bmp;
@@ -50,23 +48,57 @@ BH1750 lightMeter;
 DHT dht(DHTPIN, DHTTYPE);
 
 // === Pantalla OLED ===
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+constexpr uint8_t SCREEN_WIDTH = 128;
+constexpr uint8_t SCREEN_HEIGHT = 64;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // === MQ2 ===
-const int MQ2_umbral_base = 1400;
-const int MQ2_umbral_malo = 1700;
-const int MQ2_umbral_horrible = 1800;
+constexpr int MQ2_umbral_base = 1400;
+constexpr int MQ2_umbral_malo = 1700;
+constexpr int MQ2_umbral_horrible = 1800;
+
+// === MQTT ===
+AsyncMqttClient mqttClient;
+constexpr unsigned long PUBLISH_INTERVAL_MS = 30UL * 1000UL;
+
+// === Estado de aplicación ===
+struct SensorData {
+  float temperatureC = NAN;
+  float humidityPercent = NAN;
+  float pressureHpa = NAN;
+  float altitudeMeters = NAN;
+  float lightLux = NAN;
+  float windSpeedKmh = 0.0f;
+  float windSpeedMs = 0.0f;
+  int gasRaw = 0;
+  String gasQuality;
+};
+
+SensorData latestSensorData;
+bool hasSensorData = false;
+String lastReceivedMessage = "Sin mensajes";
+volatile bool displayNeedsUpdate = false;
+unsigned long lastPublishMillis = 0;
 
 // === Prototipos ===
 void renderDisplay(void (*pageFunc)());
 void showResumen();
 String getCalidadAire(int gasADC);
-void measureWind();
-void sendToServer(float temp, float hum, float pres, float alt, float lux, float wind, int gasA, String calidad);
-void connectWiFi();
+float measureWind();
 void IRAM_ATTR countup();
+SensorData readSensors();
+void logSensorData(const SensorData& data);
+String buildSensorPayload(const SensorData& data);
+void publishCurrentData();
+void updateDisplayIfNeeded();
+
+// Implementado al final del archivo (requerido por AsyncMqttClient)
+void OnMqttReceived(char* topic,
+                    char* payload,
+                    AsyncMqttClientMessageProperties properties,
+                    size_t len,
+                    size_t index,
+                    size_t total);
 
 // =============================================================
 // === INTERRUPCIÓN: contar pulsos del anemómetro ===
@@ -82,12 +114,13 @@ void IRAM_ATTR countup() {
 // =============================================================
 // === CÁLCULO DE VELOCIDAD DEL VIENTO ===
 // =============================================================
-void measureWind() {
+float measureWind() {
   InterruptCounter = 0;
   attachInterrupt(digitalPinToInterrupt(ANEMO_PIN), countup, FALLING);
   delay(RecordTime * 1000);
   detachInterrupt(digitalPinToInterrupt(ANEMO_PIN));
-  WindSpeed = (float)InterruptCounter / (float)RecordTime * ANEMO_FACTOR;
+  WindSpeed = static_cast<float>(InterruptCounter) / static_cast<float>(RecordTime) * ANEMO_FACTOR;
+  return WindSpeed;
 }
 
 // =============================================================
@@ -96,7 +129,7 @@ void measureWind() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("🌦 Iniciando Estación Meteorológica Local con WiFi...");
+  Serial.println("🌦 Iniciando Estación Meteorológica Local con MQTT...");
 
   Wire.begin(21, 22);
 
@@ -106,19 +139,23 @@ void setup() {
 
   if (!bmp.begin()) {
     Serial.println("❌ No se detecta BMP180/BMP085. Revisa conexiones.");
-    while (true);
+    while (true) {
+      delay(1000);
+    }
   }
 
   // --- OLED ---
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("❌ No se pudo inicializar OLED.");
-    while (true);
+    while (true) {
+      delay(1000);
+    }
   }
 
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
-  display.println("Estacion con WiFi OK!");
+  display.println("Estacion con MQTT OK!");
   display.display();
 
   // --- Pines ---
@@ -130,8 +167,16 @@ void setup() {
   pinMode(ANEMO_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  // --- WiFi ---
-  connectWiFi();
+  // --- WiFi + MQTT ---
+  WiFi.onEvent(WiFiEvent);
+  ConnectWiFi_STA();
+  InitMqtt();
+  ConnectToMqtt();
+
+  initTime();
+
+  lastPublishMillis = millis() - PUBLISH_INTERVAL_MS;  // Fuerza el primer envío inmediato
+  displayNeedsUpdate = true;
 
   Serial.println("✅ Sistema iniciado correctamente.");
 }
@@ -140,68 +185,156 @@ void setup() {
 // === LOOP PRINCIPAL ===
 // =============================================================
 void loop() {
-  float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
+  unsigned long now = millis();
 
-  float pres = bmp.readPressure() / 100.0;
-  float altitud = bmp.readAltitude();
-  float lux = lightMeter.readLightLevel();
-  int gasA = analogRead(MQ2_AO);
+  if (now - lastPublishMillis >= PUBLISH_INTERVAL_MS) {
+    publishCurrentData();
+    lastPublishMillis = now;
+  }
 
-  measureWind();
-  String calidad = getCalidadAire(gasA);
-
-  // --- Mostrar en consola ---
-  Serial.println("===================================");
-  Serial.printf("🌡 Temp: %.1f °C\n", temp);
-  Serial.printf("💧 Humedad: %.1f %%\n", hum);
-  Serial.printf("🧭 Presion: %.1f hPa\n", pres);
-  Serial.printf("⛰ Altitud: %.1f m\n", altitud);
-  Serial.printf("☀️  Luz: %.1f lx\n", lux);
-  Serial.printf("🌬 Viento: %.1f km/h (%.2f m/s)\n", WindSpeed, WindSpeed / 3.6);
-  Serial.printf("🧪 MQ2: %d (%s)\n", gasA, calidad.c_str());
-  Serial.println("===================================");
-
-  renderDisplay(showResumen);
-
-  // --- Enviar por WiFi ---
-  sendToServer(temp, hum, pres, altitud, lux, WindSpeed, gasA, calidad);
-
-  delay(10000); // cada 10 segundos
+  updateDisplayIfNeeded();
+  delay(10);
 }
 
 // =============================================================
-// === FUNCIONES DE VISUALIZACIÓN OLED ===
+// === FUNCIONES AUXILIARES ===
+// =============================================================
+SensorData readSensors() {
+  SensorData data;
+
+  data.temperatureC = dht.readTemperature();
+  data.humidityPercent = dht.readHumidity();
+
+  // Reintenta una vez si hay lectura inválida del DHT
+  if (isnan(data.temperatureC) || isnan(data.humidityPercent)) {
+    delay(200);
+    data.temperatureC = dht.readTemperature();
+    data.humidityPercent = dht.readHumidity();
+  }
+
+  data.pressureHpa = bmp.readPressure() / 100.0f;  // hPa
+  data.altitudeMeters = bmp.readAltitude();         // metros
+  data.lightLux = lightMeter.readLightLevel();      // lux
+  data.gasRaw = analogRead(MQ2_AO);                 // MQ2 analógico
+
+  data.windSpeedKmh = measureWind();
+  data.windSpeedMs = data.windSpeedKmh / 3.6f;
+  data.gasQuality = getCalidadAire(data.gasRaw);
+
+  return data;
+}
+
+void logSensorData(const SensorData& data) {
+  Serial.println("========== [SENSORES] ==========");
+  Serial.printf("🌡 Temp: %.1f °C\n", data.temperatureC);
+  Serial.printf("💧 Humedad: %.1f %%\n", data.humidityPercent);
+  Serial.printf("🧭 Presion: %.1f hPa\n", data.pressureHpa);
+  Serial.printf("⛰ Altitud: %.1f m\n", data.altitudeMeters);
+  Serial.printf("☀️  Luz: %.1f lx\n", data.lightLux);
+  Serial.printf("🌬 Viento: %.1f km/h (%.2f m/s)\n", data.windSpeedKmh, data.windSpeedMs);
+  Serial.printf("🧪 MQ2: %d (%s)\n", data.gasRaw, data.gasQuality.c_str());
+  Serial.println("=================================");
+}
+
+String buildSensorPayload(const SensorData& data) {
+  StaticJsonDocument<512> doc;
+
+  doc["sensor_id"] = "WT_001";
+  doc["street_id"] = "street_1253";
+  doc["timestamp"] = getTimestampISO8601();
+
+  JsonObject readings = doc.createNestedObject("data");
+  readings["temperature_c"] = data.temperatureC;
+  readings["humidity_percent"] = data.humidityPercent;
+  readings["pressure_hpa"] = data.pressureHpa;
+  readings["altitude_m"] = data.altitudeMeters;
+  readings["light_lux"] = data.lightLux;
+  readings["wind_speed_kmh"] = data.windSpeedKmh;
+  readings["wind_speed_ms"] = data.windSpeedMs;
+  readings["gas_adc"] = data.gasRaw;
+  readings["gas_quality"] = data.gasQuality;
+
+  JsonObject meta = doc.createNestedObject("meta");
+  meta["mqtt_topic"] = MQTT_TOPIC;
+  meta["device_ip"] = WiFi.localIP().toString();
+
+  String json;
+  serializeJson(doc, json);
+  return json;
+}
+
+void publishCurrentData() {
+  SensorData data = readSensors();
+  latestSensorData = data;
+  hasSensorData = true;
+  displayNeedsUpdate = true;
+
+  logSensorData(data);
+
+  String payload = buildSensorPayload(data);
+  if (PublishMqtt(payload)) {
+    // Sin impresión adicional para mantener la consola enfocada en sensores y recepción
+  }
+}
+
+void updateDisplayIfNeeded() {
+  if (!displayNeedsUpdate) {
+    return;
+  }
+
+  displayNeedsUpdate = false;
+  renderDisplay(showResumen);
+}
+
+// =============================================================
+// === VISUALIZACIÓN OLED ===
 // =============================================================
 void showResumen() {
+  display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.println("== Estacion Local ==");
 
-  float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
-  float pres = bmp.readPressure() / 100.0;
-  float altitud = bmp.readAltitude();
-  float lux = lightMeter.readLightLevel();
-  int gasA = analogRead(MQ2_AO);
-  String calidad = getCalidadAire(gasA);
+  if (!hasSensorData) {
+    display.println("Sin lecturas");
+    display.display();
+    return;
+  }
 
-  display.printf("T: %.1f C  H: %.1f%%\n", temp, hum);
-  display.printf("Pres: %.1f hPa\n", pres);
-  display.printf("Alt: %.1f m\n", altitud);
-  display.printf("Luz: %.1f lx\n", lux);
-  display.printf("Viento: %.1f km/h\n", WindSpeed);
-  display.printf("Gas: %d (%s)\n", gasA, calidad.c_str());
-}
+  display.printf("T: %.1f C  H: %.1f%%\n", latestSensorData.temperatureC, latestSensorData.humidityPercent);
+  display.printf("Pres: %.1f hPa\n", latestSensorData.pressureHpa);
+  display.printf("Alt: %.1f m\n", latestSensorData.altitudeMeters);
+  display.printf("Luz: %.1f lx\n", latestSensorData.lightLux);
+  display.printf("Viento: %.1f km/h (%.2f m/s)\n", latestSensorData.windSpeedKmh, latestSensorData.windSpeedMs);
+  display.printf("Gas: %d (%s)\n", latestSensorData.gasRaw, latestSensorData.gasQuality.c_str());
 
-void renderDisplay(void (*pageFunc)()) {
-  display.clearDisplay();
-  pageFunc();
+  display.setCursor(0, 48);
+  display.println("MQTT msg:");
+  display.setTextSize(1);
+
+  String line1 = lastReceivedMessage;
+  line1.replace('\n', ' ');
+  line1.replace('\r', ' ');
+  if (line1.length() > 21) {
+    display.println(line1.substring(0, 21));
+    if (line1.length() > 42) {
+      display.println(line1.substring(21, 42));
+    } else {
+      display.println(line1.substring(21));
+    }
+  } else {
+    display.println(line1);
+  }
+
   display.display();
 }
 
+void renderDisplay(void (*pageFunc)()) {
+  pageFunc();
+}
+
 // =============================================================
-// === FUNCIÓN: CALIDAD DEL AIRE MQ2 ===
+// === CALIDAD DEL AIRE MQ2 ===
 // =============================================================
 String getCalidadAire(int gasADC) {
   if (gasADC > MQ2_umbral_horrible) return "PELIGROSA";
@@ -211,53 +344,31 @@ String getCalidadAire(int gasADC) {
 }
 
 // =============================================================
-// === FUNCIÓN: CONEXIÓN WiFi ===
+// === CALLBACKS MQTT ===
 // =============================================================
-void connectWiFi() {
-  Serial.printf("🔌 Conectando a WiFi: %s\n", ssid);
-  WiFi.begin(ssid, password);
-  int retry = 0;
-  while (WiFi.status() != WL_CONNECTED && retry < 20) {
-    delay(500);
-    Serial.print(".");
-    retry++;
+void OnMqttReceived(char* topic,
+                    char* payload,
+                    AsyncMqttClientMessageProperties properties,
+                    size_t len,
+                    size_t index,
+                    size_t total) {
+  static String accumulatedPayload;
+
+  if (index == 0) {
+    accumulatedPayload = "";
   }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi conectado!");
-    Serial.print("📶 IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\n❌ No se pudo conectar a WiFi.");
+
+  accumulatedPayload += GetPayloadContent(payload, len);
+
+  if (index + len < total) {
+    return;  // Espera al último fragmento
   }
-}
 
-// =============================================================
-// === FUNCIÓN: ENVÍO DE DATOS A SERVIDOR O THINGSPEAK ===
-// =============================================================
-void sendToServer(float temp, float hum, float pres, float alt, float lux, float wind, int gasA, String calidad) {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
+  lastReceivedMessage = accumulatedPayload;
+  displayNeedsUpdate = true;
 
-    String url = serverName + "?api_key=" + apiKey +
-                 "&field1=" + String(temp, 1) +
-                 "&field2=" + String(hum, 1) +
-                 "&field3=" + String(pres, 1) +
-                 "&field4=" + String(alt, 1) +
-                 "&field5=" + String(lux, 1) +
-                 "&field6=" + String(wind, 1) +
-                 "&field7=" + String(gasA) +
-                 "&field8=" + calidad;
-
-    http.begin(url);
-    int httpCode = http.GET();
-
-    if (httpCode > 0) {
-      Serial.printf("📡 Datos enviados correctamente (%d)\n", httpCode);
-    } else {
-      Serial.printf("⚠️ Error enviando datos: %s\n", http.errorToString(httpCode).c_str());
-    }
-    http.end();
-  } else {
-    Serial.println("⚠️ WiFi no conectado, no se enviaron datos.");
-  }
+  Serial.println("---------- [MQTT RECIBIDO] ----------");
+  Serial.printf("Topic: %s\n", topic);
+  Serial.printf("Payload: %s\n", accumulatedPayload.c_str());
+  Serial.println("-------------------------------------");
 }

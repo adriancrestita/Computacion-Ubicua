@@ -24,21 +24,28 @@ String GetPayloadContent(char* data, size_t len)
 
 void SuscribeMqtt()
 {
-        // Usamos MQTT_BASE_TOPIC, asumiendo que está definido en el archivo de configuración incluido por el sketch
-	uint16_t packetIdSub = mqttClient.subscribe(MQTT_BASE_TOPIC "/comandos", 0); 
-	Serial.print("Subscribing at QoS 0, packetId: ");
-	Serial.println(packetIdSub);
+        uint16_t packetIdSub = mqttClient.subscribe(MQTT_TOPIC, MQTT_QOS);
+        Serial.print("Subscribing at QoS ");
+        Serial.print(MQTT_QOS);
+        Serial.print(", packetId: ");
+        Serial.println(packetIdSub);
 }
 
-void PublishMqtt()
+bool PublishMqtt(const String& payload, bool retain = false)
 {
-	String payload = "";
+        if(!mqttClient.connected())
+        {
+                return false;
+        }
 
-	StaticJsonDocument<300> jsonDoc;
-	jsonDoc["data"] = millis();
-	serializeJson(jsonDoc, payload);
+        uint16_t packetId = mqttClient.publish(MQTT_TOPIC, MQTT_QOS, retain, payload.c_str(), payload.length());
 
-	mqttClient.publish("hello/world", 0, true, (char*)payload.c_str());
+        if(MQTT_QOS == 0)
+        {
+                return packetId == 0;
+        }
+
+        return packetId > 0;
 }
 
 // NOTA: El callback OnMqttReceived se declara y define en est-metereologica.ino

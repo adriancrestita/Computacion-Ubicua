@@ -95,18 +95,23 @@ void OnMqttPublish(uint16_t packetId)
 
 void InitMqtt()
 {
-	mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectToMqtt));
-	wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(5000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectWiFi_STA));
+        mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectToMqtt));
+        wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(5000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectWiFi_STA));
 
     // Asignación de Callbacks
-	mqttClient.onConnect(OnMqttConnect);
-	mqttClient.onDisconnect(OnMqttDisconnect);
+        mqttClient.onConnect(OnMqttConnect);
+        mqttClient.onDisconnect(OnMqttDisconnect);
 
-	mqttClient.onSubscribe(OnMqttSubscribe);
-	mqttClient.onUnsubscribe(OnMqttUnsubscribe);
+        mqttClient.onSubscribe(OnMqttSubscribe);
+        mqttClient.onUnsubscribe(OnMqttUnsubscribe);
 
-	mqttClient.onPublish(OnMqttPublish);
-    
+        mqttClient.onPublish(OnMqttPublish);
+        mqttClient.onMessage(OnMqttReceived);
+
     // Configura el servidor
-	mqttClient.setServer(BROKER_IP, BROKER_PORT); 
+        mqttClient.setServer(BROKER_IP, BROKER_PORT);
+        mqttClient.setClientId(MQTT_CLIENT_ID);
+        mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);
+        mqttClient.setKeepAlive(60);
+        mqttClient.setCleanSession(true);
 }
