@@ -15,7 +15,7 @@ IPAddress subnet(255, 255, 255, 0);
 
 // --- MQTT ---
 // IP de tu broker Mosquitto (formato: 192,168,1,10)
-#define MQTT_HOST       172,22,92,67
+#define MQTT_HOST       192,168,1,241
 #define MQTT_PORT       1883
 #define MQTT_USER       ""
 #define MQTT_PASSWORD   ""
