@@ -1,16 +1,18 @@
 #pragma once
 #include <WiFi.h>
+// Este archivo ASUME que las siguientes macros están definidas en el archivo de configuración incluido por el sketch:
+// WIFI_SSID, WIFI_PASSWORD
 
-void ConnectWiFi_STA(bool useStaticIP = false)
+void ConnectWiFi_STA()
 {
    Serial.println("");
    WiFi.mode(WIFI_STA);
-   WiFi.begin(ssid, password);
-   if(useStaticIP) WiFi.config(ip, gateway, subnet);
+   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+   
    while (WiFi.status() != WL_CONNECTED)
-   {
-     delay(100);
-     Serial.print('.');
+   { 
+     delay(100);  
+     Serial.print('.'); 
    }
  
    Serial.println("");
@@ -20,8 +22,8 @@ void ConnectWiFi_STA(bool useStaticIP = false)
    Serial.println(WiFi.localIP());
 }
 
-void ConnectWiFi_AP(bool useStaticIP = false)
-{
+void ConnectWiFi_AP()
+{ 
    Serial.println("");
    WiFi.mode(WIFI_AP);
    while(!WiFi.softAP(ssid, password))
@@ -29,8 +31,7 @@ void ConnectWiFi_AP(bool useStaticIP = false)
      Serial.println(".");
      delay(100);
    }
-   if(useStaticIP) WiFi.softAPConfig(ip, gateway, subnet);
-
+   
    Serial.println("");
    Serial.print("Iniciado AP:\t");
    Serial.println(ssid);
