@@ -1,15 +1,16 @@
 #ifndef WEATHER_STATION_CONFIG_H
 #define WEATHER_STATION_CONFIG_H
 
-// --- WiFi ---
-#define WIFI_SSID       "cubicua"
-#define WIFI_PASSWORD   ""
+#include <IPAddress.h>
 
-// === DEFINICIONES DE IP ESTÁTICA (Necesarias para ESP32_Utils.hpp) ===
-#define WIFI_IP         192,168,1,200
-#define WIFI_GATEWAY    192,168,1,1
-#define WIFI_SUBNET     255,255,255,0
-// ======================================================================
+// --- WiFi ---
+const char* ssid     = "cubicua";
+const char* password = "";
+const char* hostname = "ESP32_METEO_001";
+
+IPAddress ip(192, 168, 1, 200);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
 
 // --- MQTT ---
 // IP de tu broker Mosquitto (formato: 192,168,1,10)
@@ -22,11 +23,4 @@
 #define MQTT_TOPIC      "sensors/street_1253/WT_001"
 #define MQTT_QOS        1
 
-// --- Zona Horaria (para NTP) ---
-#define TIMEZONE        "Europe/Madrid"
-
 #endif  // WEATHER_STATION_CONFIG_H
-
-
-
-172.22.92.67

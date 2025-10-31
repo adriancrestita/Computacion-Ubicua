@@ -1,117 +1,117 @@
 #pragma once
-#include <freertos/timers.h> 
-#include <WiFi.h>
-#include "MQTT.hpp" // Para obtener BROKER_IP, BROKER_PORT y mqttClient
-#include "ESP32_Utils.hpp" // Para obtener ConnectWiFi_STA
 
-// === DECLARACIONES GLOBALES ===
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
+#include <WiFi.h>
+
+#include "ESP32_Utils.hpp"
+#include "MQTT.hpp"
+
+extern AsyncMqttClient mqttClient;
+
+extern void OnMqttReceived(char* topic,
+                           char* payload,
+                           AsyncMqttClientMessageProperties properties,
+                           size_t len,
+                           size_t index,
+                           size_t total);
+
 TimerHandle_t mqttReconnectTimer;
 TimerHandle_t wifiReconnectTimer;
 
-// === PROTOTIPOS ===
-void ConnectToMqtt();
-// Prototipo de ConnectWiFi_STA es redundante aquí, pero lo mantenemos si es necesario por el profesor.
-void SuscribeMqtt();
-void OnMqttConnect(bool sessionPresent);
-void OnMqttDisconnect(AsyncMqttClientDisconnectReason reason);
-void OnMqttSubscribe(uint16_t packetId, uint8_t qos);
-void OnMqttUnsubscribe(uint16_t packetId);
-void OnMqttPublish(uint16_t packetId);
-void OnMqttReceived(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
-
-
 void ConnectToMqtt()
 {
-	Serial.println("Connecting to MQTT...");
-	mqttClient.connect(); 
+    Serial.println("Connecting to MQTT...");
+    mqttClient.connect();
 }
 
-// MODIFICADO: Usamos los nombres de eventos correctos para la API moderna del ESP32
-void WiFiEvent(arduino_event_id_t event) 
+void WiFiEvent(WiFiEvent_t event)
 {
-	Serial.printf("[WiFi-event] event: %d\n", event);
-	switch(event)
-	{
-	case ARDUINO_EVENT_WIFI_STA_GOT_IP: 
-		Serial.println("WiFi connected");
-		Serial.println("IP address: ");
-		Serial.println(WiFi.localIP());
-		// Detiene el temporizador de reconexión WiFi (si estaba activo)
-		xTimerStop(wifiReconnectTimer, 0); 
-		ConnectToMqtt();
-		break;
-	case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: 
-		Serial.println("WiFi lost connection");
-		xTimerStop(mqttReconnectTimer, 0); 
-		xTimerStart(wifiReconnectTimer, 0);
-		break;
-    case ARDUINO_EVENT_WIFI_AP_START:
-    case ARDUINO_EVENT_WIFI_AP_STOP:
-    case ARDUINO_EVENT_WIFI_STA_START:
+    Serial.printf("[WiFi-event] event: %d\n", event);
+    switch(event)
+    {
+    case SYSTEM_EVENT_STA_GOT_IP:
+        Serial.println("WiFi connected");
+        Serial.println("IP address: ");
+        Serial.println(WiFi.localIP());
+        ConnectToMqtt();
         break;
-	}
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        Serial.println("WiFi lost connection");
+        xTimerStop(mqttReconnectTimer, 0); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
+        xTimerStart(wifiReconnectTimer, 0);
+        break;
+    default:
+        break;
+    }
 }
 
 void OnMqttConnect(bool sessionPresent)
 {
-	Serial.println("Connected to MQTT.");
-	Serial.print("Session present: ");
-	Serial.println(sessionPresent);
-	SuscribeMqtt(); 
+    Serial.println("Connected to MQTT.");
+    Serial.print("Session present: ");
+    Serial.println(sessionPresent);
+    SuscribeMqtt();
 }
 
 void OnMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-	Serial.println("Disconnected from MQTT.");
+    Serial.println("Disconnected from MQTT.");
 
-	if(WiFi.isConnected())
-	{
-		xTimerStart(mqttReconnectTimer, 0);
-	}
+    if(WiFi.isConnected())
+    {
+        xTimerStart(mqttReconnectTimer, 0);
+    }
 }
 
 void OnMqttSubscribe(uint16_t packetId, uint8_t qos)
 {
-	Serial.println("Subscribe acknowledged.");
-	Serial.print("  packetId: ");
-	Serial.println(packetId);
-	Serial.print("  qos: ");
-	Serial.println(qos);
+    Serial.println("Subscribe acknowledged.");
+    Serial.print("  packetId: ");
+    Serial.println(packetId);
+    Serial.print("  qos: ");
+    Serial.println(qos);
 }
 
 void OnMqttUnsubscribe(uint16_t packetId)
 {
-	Serial.println("Unsubscribe acknowledged.");
-	Serial.print("  packetId: ");
-	Serial.println(packetId);
+    Serial.println("Unsubscribe acknowledged.");
+    Serial.print("  packetId: ");
+    Serial.println(packetId);
 }
 
 void OnMqttPublish(uint16_t packetId)
 {
-	Serial.println("Publish acknowledged.");
-	Serial.print("  packetId: ");
-	Serial.println(packetId);
+    Serial.println("Publish acknowledged.");
+    Serial.print("  packetId: ");
+    Serial.println(packetId);
+}
+
+static void ConnectToMqttCallback(TimerHandle_t)
+{
+    ConnectToMqtt();
+}
+
+static void ConnectWiFi_STA_Callback(TimerHandle_t)
+{
+    ConnectWiFi_STA();
 }
 
 void InitMqtt()
 {
-        mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectToMqtt));
-        wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(5000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(ConnectWiFi_STA));
+    mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, ConnectToMqttCallback);
+    wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(5000), pdFALSE, (void*)0, ConnectWiFi_STA_Callback);
 
-    // Asignación de Callbacks
-        mqttClient.onConnect(OnMqttConnect);
-        mqttClient.onDisconnect(OnMqttDisconnect);
+    mqttClient.onConnect(OnMqttConnect);
+    mqttClient.onDisconnect(OnMqttDisconnect);
 
-        mqttClient.onSubscribe(OnMqttSubscribe);
-        mqttClient.onUnsubscribe(OnMqttUnsubscribe);
+    mqttClient.onSubscribe(OnMqttSubscribe);
+    mqttClient.onUnsubscribe(OnMqttUnsubscribe);
 
-        mqttClient.onPublish(OnMqttPublish);
-        mqttClient.onMessage(OnMqttReceived);
+    mqttClient.onMessage(OnMqttReceived);
+    mqttClient.onPublish(OnMqttPublish);
 
-    // Configura el servidor
-        mqttClient.setServer(BROKER_IP, BROKER_PORT);
-        mqttClient.setClientId(MQTT_CLIENT_ID);
-        mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);
-        mqttClient.setKeepAlive(60);
-        mqttClient.setCleanSession(true);
+    mqttClient.setServer(mqttBroker, mqttPort);
+    mqttClient.setClientId(mqttClientId);
+    mqttClient.setCredentials(mqttUser, mqttPassword);
 }
