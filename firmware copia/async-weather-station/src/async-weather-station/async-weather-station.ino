@@ -7,21 +7,22 @@
  *  ======================================================
  */
 
-#include "../../config/config.h"
-
 #include <WiFi.h>
-#include <Wire.h>
 #include <AsyncMqttClient.h>
+#include <ArduinoJson.h>
+
+#include "../../config/config.h"
+#include "MQTT.hpp"
+#include "ESP32_Utils.hpp"
+#include "ESP32_Utils_MQTT_Async.hpp"
+#include "TimeUtils.hpp"
+#include "JsonBuilder.hpp"
+
+#include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <BH1750.h>
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
-#include <ArduinoJson.h>
-
-#include "../../include/ESP32_Utils.hpp"
-#include "../../include/ESP32_Utils_MQTT_Async.hpp"
-#include "../../include/MQTT.hpp"
-#include "../../include/TimeUtils.hpp"
 
 // === Pines ===
 #define DHTPIN 14
@@ -56,6 +57,15 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 constexpr int MQ2_umbral_base = 1400;
 constexpr int MQ2_umbral_malo = 1700;
 constexpr int MQ2_umbral_horrible = 1800;
+
+// === Identificadores de dispositivo ===
+constexpr char SENSOR_ID[] = "WT_001";
+constexpr char SENSOR_TYPE[] = "weather";
+constexpr char STREET_ID[] = "street_1253";
+constexpr char DISTRICT[] = "Centro";
+constexpr char NEIGHBORHOOD[] = "Universidad";
+constexpr double LOCATION_LATITUDE = 40.4094736;
+constexpr double LOCATION_LONGITUDE = -3.6920903;
 
 // === MQTT ===
 AsyncMqttClient mqttClient;
@@ -128,7 +138,7 @@ float measureWind() {
 // =============================================================
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(500);
   Serial.println("🌦 Iniciando Estación Meteorológica Local con MQTT...");
 
   Wire.begin(21, 22);
@@ -169,8 +179,8 @@ void setup() {
 
   // --- WiFi + MQTT ---
   WiFi.onEvent(WiFiEvent);
-  ConnectWiFi_STA();
   InitMqtt();
+  ConnectWiFi_STA();
   ConnectToMqtt();
 
   initTime();
@@ -237,30 +247,25 @@ void logSensorData(const SensorData& data) {
 }
 
 String buildSensorPayload(const SensorData& data) {
-  StaticJsonDocument<512> doc;
-
-  doc["sensor_id"] = "WT_001";
-  doc["street_id"] = "street_1253";
-  doc["timestamp"] = getTimestampISO8601();
-
-  JsonObject readings = doc.createNestedObject("data");
-  readings["temperature_c"] = data.temperatureC;
-  readings["humidity_percent"] = data.humidityPercent;
-  readings["pressure_hpa"] = data.pressureHpa;
-  readings["altitude_m"] = data.altitudeMeters;
-  readings["light_lux"] = data.lightLux;
-  readings["wind_speed_kmh"] = data.windSpeedKmh;
-  readings["wind_speed_ms"] = data.windSpeedMs;
-  readings["gas_adc"] = data.gasRaw;
-  readings["gas_quality"] = data.gasQuality;
-
-  JsonObject meta = doc.createNestedObject("meta");
-  meta["mqtt_topic"] = MQTT_TOPIC;
-  meta["device_ip"] = WiFi.localIP().toString();
-
-  String json;
-  serializeJson(doc, json);
-  return json;
+  return buildWeatherStationJson(
+    SENSOR_ID,
+    SENSOR_TYPE,
+    STREET_ID,
+    DISTRICT,
+    NEIGHBORHOOD,
+    LOCATION_LATITUDE,
+    LOCATION_LONGITUDE,
+    data.altitudeMeters,
+    data.temperatureC,
+    data.humidityPercent,
+    data.windSpeedKmh,
+    data.windSpeedMs,
+    data.lightLux,
+    data.pressureHpa,
+    data.gasQuality,
+    data.gasRaw,
+    WiFi.localIP().toString()
+  );
 }
 
 void publishCurrentData() {
@@ -272,9 +277,13 @@ void publishCurrentData() {
   logSensorData(data);
 
   String payload = buildSensorPayload(data);
-  if (!PublishMqtt(payload)) {
-    // Advertencia: el mensaje no se pudo publicar porque no hay sesión MQTT activa.
-    Serial.println("[WARN] No se pudo publicar el payload MQTT.");
+  if (PublishMqtt(payload)) {
+    Serial.print("[MQTT] Publicado en ");
+    Serial.print(MQTT_TOPIC);
+    Serial.print(" -> ");
+    Serial.println(payload);
+  } else {
+    Serial.println("[WARN] No se pudo publicar el payload MQTT (sin conexión).");
   }
 }
 
@@ -371,5 +380,18 @@ void OnMqttReceived(char* topic,
   Serial.println("---------- [MQTT RECIBIDO] ----------");
   Serial.printf("Topic: %s\n", topic);
   Serial.printf("Payload: %s\n", accumulatedPayload.c_str());
+
+  StaticJsonDocument<384> doc;
+  if (deserializeJson(doc, accumulatedPayload) == DeserializationError::Ok) {
+    if (doc.containsKey("data")) {
+      JsonVariant data = doc["data"];
+      if (data.containsKey("temperature_celsius")) {
+        Serial.printf("Temp remota: %.2f °C\n", data["temperature_celsius"].as<float>());
+      }
+      if (data.containsKey("wind_speed_kmh")) {
+        Serial.printf("Viento remoto: %.2f km/h\n", data["wind_speed_kmh"].as<float>());
+      }
+    }
+  }
   Serial.println("-------------------------------------");
 }
