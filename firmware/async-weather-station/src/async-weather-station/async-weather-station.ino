@@ -18,10 +18,10 @@
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
 
-#include "../../ESP32_Utils.hpp"
-#include "../../ESP32_Utils_MQTT_Async.hpp"
-#include "../../MQTT.hpp"
-#include "../../TimeUtils.hpp"
+#include "../../include/ESP32_Utils.hpp"
+#include "../../include/ESP32_Utils_MQTT_Async.hpp"
+#include "../../include/MQTT.hpp"
+#include "../../include/TimeUtils.hpp"
 
 // === Pines ===
 #define DHTPIN 14
