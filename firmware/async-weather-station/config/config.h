@@ -2,8 +2,8 @@
 #define WEATHER_STATION_CONFIG_H
 
 // --- WiFi ---
-#define WIFI_SSID       "MOVISTAR_8B3B"
-#define WIFI_PASSWORD   "sUYPsMoDVZERqVFi2xWj"
+#define WIFI_SSID       ""
+#define WIFI_PASSWORD   ""
 
 // === DEFINICIONES DE IP ESTÁTICA (Necesarias para ESP32_Utils.hpp) ===
 #define WIFI_IP         192,168,1,200

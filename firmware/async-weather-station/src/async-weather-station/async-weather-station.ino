@@ -19,11 +19,11 @@
 #include <AsyncTCP.h>
 #include <AsyncMqttClient.h>
 
-#include "../config/config.h"
-#include "../include/ESP32_Utils.hpp"
-#include "../include/ESP32_Utils_MQTT_Async.hpp"
-#include "../include/MQTT.hpp"
-#include "../include/JsonBuilder.hpp"
+#include "../../config/config.h"
+#include "../../include/ESP32_Utils.hpp"
+#include "../../include/ESP32_Utils_MQTT_Async.hpp"
+#include "../../include/MQTT.hpp"
+#include "../../include/JsonBuilder.hpp"
 
 // Cliente MQTT principal
 AsyncMqttClient mqttClient;
@@ -124,6 +124,7 @@ void measureWind() {
 // =============================================================
 void setup() {
   Serial.begin(115200);
+  Serial.println("Iniciando sistema...");
   Wire.begin(21, 22);
 
   // Inicialización de sensores
@@ -196,7 +197,9 @@ void loop() {
       altitud, WEATHER_DISTRICT, WEATHER_NEIGHBORHOOD,
       temp, hum, windSpeed, lux, pres, static_cast<double>(gasA)
     );
-    publicarSensor(WEATHER_TOPIC, payload);
+    Serial.println(payload);
+    //publicarSensor(WEATHER_TOPIC, payload);
+    
   }
 
   // Render de la pantalla OLED según menú seleccionado
