@@ -272,9 +272,7 @@ void publishCurrentData() {
   logSensorData(data);
 
   String payload = buildSensorPayload(data);
-  if (PublishMqtt(payload)) {
-    // Sin impresión adicional para mantener la consola enfocada en sensores y recepción
-  }
+  PublishMqtt(payload);
 }
 
 void updateDisplayIfNeeded() {

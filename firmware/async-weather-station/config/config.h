@@ -1,6 +1,8 @@
 #ifndef WEATHER_STATION_CONFIG_H
 #define WEATHER_STATION_CONFIG_H
 
+#include <IPAddress.h>
+
 // --- WiFi ---
 #define WIFI_SSID       "DIGI-R5mE"
 #define WIFI_PASSWORD   "hEypg6XW"

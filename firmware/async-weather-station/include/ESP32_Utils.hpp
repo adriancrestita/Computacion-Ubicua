@@ -6,7 +6,6 @@
 void ConnectWiFi_STA()
 {
    Serial.println("");
-   // Usamos las macros definidas en el archivo de configuración
    WiFi.mode(WIFI_STA);
    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
    
@@ -18,7 +17,7 @@ void ConnectWiFi_STA()
  
    Serial.println("");
    Serial.print("Iniciado STA:\t");
-   Serial.println(WIFI_SSID);
+   Serial.println(ssid);
    Serial.print("IP address:\t");
    Serial.println(WiFi.localIP());
 }
@@ -27,8 +26,7 @@ void ConnectWiFi_AP()
 { 
    Serial.println("");
    WiFi.mode(WIFI_AP);
-   // Usamos las macros definidas en el archivo de configuración
-   while(!WiFi.softAP(WIFI_SSID, WIFI_PASSWORD))
+   while(!WiFi.softAP(ssid, password))
    {
      Serial.println(".");
      delay(100);
@@ -36,7 +34,7 @@ void ConnectWiFi_AP()
    
    Serial.println("");
    Serial.print("Iniciado AP:\t");
-   Serial.println(WIFI_SSID);
+   Serial.println(ssid);
    Serial.print("IP address:\t");
    Serial.println(WiFi.softAPIP());
 }
