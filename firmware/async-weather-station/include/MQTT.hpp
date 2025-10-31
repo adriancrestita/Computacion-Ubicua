@@ -1,51 +1,51 @@
 #pragma once
-#include <AsyncMqttClient.h>
-#include <WiFi.h> // Necesario para IPAddress
 
-// === DECLARACIONES GLOBALES ===
-// NOTA: mqttClient está definido en est-metereologica.ino
+#include <AsyncMqttClient.h>
+#include <WiFi.h>
+
 extern AsyncMqttClient mqttClient;
 
-// === CONSTANTES DE CONEXIÓN ===
-// Usamos las macros definidas en el archivo de configuración del sketch para crear las constantes
-const IPAddress BROKER_IP(MQTT_HOST);
-const int BROKER_PORT = MQTT_PORT;
-
+const IPAddress mqttBroker(MQTT_HOST);
+const uint16_t mqttPort = MQTT_PORT;
+const char* mqttUser = MQTT_USER;
+const char* mqttPassword = MQTT_PASSWORD;
+const char* mqttClientId = MQTT_CLIENT_ID;
+#ifndef MQTT_BASE_TOPIC
+#define MQTT_BASE_TOPIC MQTT_TOPIC
+#endif
+const char* mqttBaseTopic = MQTT_BASE_TOPIC;
+const char* mqttPublishTopic = MQTT_TOPIC;
+const uint8_t mqttQos = MQTT_QOS;
 
 String GetPayloadContent(char* data, size_t len)
 {
-	String content = "";
-	for(size_t i = 0; i < len; i++)
-	{
-		content.concat(data[i]);
-	}
-	return content;
+    String content = "";
+    for(size_t i = 0; i < len; i++)
+    {
+        content.concat(data[i]);
+    }
+    return content;
 }
 
 void SuscribeMqtt()
 {
-        uint16_t packetIdSub = mqttClient.subscribe(MQTT_TOPIC, MQTT_QOS);
-        Serial.print("Subscribing at QoS ");
-        Serial.print(MQTT_QOS);
-        Serial.print(", packetId: ");
-        Serial.println(packetIdSub);
+    String commandTopic = String(mqttBaseTopic) + "/comandos";
+    // Reemplazado: suscripción directa a MQTT_TOPIC. Ahora se usa MQTT_BASE_TOPIC para derivar el canal de comandos.
+    uint16_t packetIdSub = mqttClient.subscribe(commandTopic.c_str(), mqttQos);
+    Serial.print("Subscribing at QoS ");
+    Serial.print(mqttQos);
+    Serial.print(", packetId: ");
+    Serial.println(packetIdSub);
 }
 
-bool PublishMqtt(const String& payload, bool retain = false)
+bool PublishMqtt(const String& payload, bool retain = true)
 {
-        if(!mqttClient.connected())
-        {
-                return false;
-        }
+    if(!mqttClient.connected())
+    {
+        // Eliminado: publish sin comprobar estado. Ahora se devuelve false cuando no hay conexión MQTT.
+        return false;
+    }
 
-        uint16_t packetId = mqttClient.publish(MQTT_TOPIC, MQTT_QOS, retain, payload.c_str(), payload.length());
-
-        if(MQTT_QOS == 0)
-        {
-                return packetId == 0;
-        }
-
-        return packetId > 0;
+    bool queued = mqttClient.publish(mqttPublishTopic, mqttQos, retain, payload.c_str());
+    return queued;
 }
-
-// NOTA: El callback OnMqttReceived se declara y define en est-metereologica.ino
