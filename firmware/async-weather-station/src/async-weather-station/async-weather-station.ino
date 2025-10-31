@@ -272,7 +272,10 @@ void publishCurrentData() {
   logSensorData(data);
 
   String payload = buildSensorPayload(data);
-  PublishMqtt(payload);
+  if (!PublishMqtt(payload)) {
+    // Advertencia: el mensaje no se pudo publicar porque no hay sesión MQTT activa.
+    Serial.println("[WARN] No se pudo publicar el payload MQTT.");
+  }
 }
 
 void updateDisplayIfNeeded() {

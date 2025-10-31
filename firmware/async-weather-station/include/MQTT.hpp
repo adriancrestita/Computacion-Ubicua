@@ -10,7 +10,11 @@ const uint16_t mqttPort = MQTT_PORT;
 const char* mqttUser = MQTT_USER;
 const char* mqttPassword = MQTT_PASSWORD;
 const char* mqttClientId = MQTT_CLIENT_ID;
-const char* mqttTopic = MQTT_TOPIC;
+#ifndef MQTT_BASE_TOPIC
+#define MQTT_BASE_TOPIC MQTT_TOPIC
+#endif
+const char* mqttBaseTopic = MQTT_BASE_TOPIC;
+const char* mqttPublishTopic = MQTT_TOPIC;
 const uint8_t mqttQos = MQTT_QOS;
 
 String GetPayloadContent(char* data, size_t len)
@@ -25,19 +29,23 @@ String GetPayloadContent(char* data, size_t len)
 
 void SuscribeMqtt()
 {
-    uint16_t packetIdSub = mqttClient.subscribe(mqttTopic, mqttQos);
+    String commandTopic = String(mqttBaseTopic) + "/comandos";
+    // Reemplazado: suscripción directa a MQTT_TOPIC. Ahora se usa MQTT_BASE_TOPIC para derivar el canal de comandos.
+    uint16_t packetIdSub = mqttClient.subscribe(commandTopic.c_str(), mqttQos);
     Serial.print("Subscribing at QoS ");
     Serial.print(mqttQos);
     Serial.print(", packetId: ");
     Serial.println(packetIdSub);
 }
 
-void PublishMqtt(const String& payload, bool retain = true)
+bool PublishMqtt(const String& payload, bool retain = true)
 {
     if(!mqttClient.connected())
     {
-        return;
+        // Eliminado: publish sin comprobar estado. Ahora se devuelve false cuando no hay conexión MQTT.
+        return false;
     }
 
-    mqttClient.publish(mqttTopic, mqttQos, retain, payload.c_str());
+    bool queued = mqttClient.publish(mqttPublishTopic, mqttQos, retain, payload.c_str());
+    return queued;
 }

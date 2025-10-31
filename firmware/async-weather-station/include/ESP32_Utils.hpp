@@ -1,18 +1,17 @@
 #pragma once
 #include <WiFi.h>
-// Este archivo ASUME que las siguientes macros están definidas en el archivo de configuración incluido por el sketch:
-// WIFI_SSID, WIFI_PASSWORD
 
 void ConnectWiFi_STA()
 {
    Serial.println("");
    WiFi.mode(WIFI_STA);
-   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-   
+   WiFi.setHostname(hostname);
+   WiFi.begin(ssid, password);
+   // Eliminado: uso de IP estática (WiFi.config), ahora DHCP asigna la dirección automáticamente.
    while (WiFi.status() != WL_CONNECTED)
-   { 
-     delay(100);  
-     Serial.print('.'); 
+   {
+     delay(100);
+     Serial.print('.');
    }
  
    Serial.println("");
@@ -23,7 +22,7 @@ void ConnectWiFi_STA()
 }
 
 void ConnectWiFi_AP()
-{ 
+{
    Serial.println("");
    WiFi.mode(WIFI_AP);
    while(!WiFi.softAP(ssid, password))
@@ -31,7 +30,8 @@ void ConnectWiFi_AP()
      Serial.println(".");
      delay(100);
    }
-   
+   // Eliminado: configuración manual de IP en modo AP, se mantiene la asignación por defecto del ESP32.
+
    Serial.println("");
    Serial.print("Iniciado AP:\t");
    Serial.println(ssid);
