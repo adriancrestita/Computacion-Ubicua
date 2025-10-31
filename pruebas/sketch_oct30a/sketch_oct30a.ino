@@ -132,7 +132,7 @@ void loop() {
   delay(100);
 
   float pres = bmp.readPressure() / 100.0;        // hPa
-  float altitud = bmp.readAltitude(1013.25);      // metros
+  float altitud = bmp.readAltitude();      // metros
   float lux = lightMeter.readLightLevel();        // lux
   int gasA = analogRead(MQ2_AO);                  // MQ2 analógico
   measureWind();                                  // velocidad viento
@@ -165,7 +165,7 @@ void showResumen() {
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
   float pres = bmp.readPressure() / 100.0;
-  float altitud = bmp.readAltitude(1013.25);
+  float altitud = bmp.readAltitude();
   float lux = lightMeter.readLightLevel();
   int gasA = analogRead(MQ2_AO);
   String calidad = getCalidadAire(gasA);

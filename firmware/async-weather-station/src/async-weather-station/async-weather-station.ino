@@ -1,34 +1,31 @@
 /* ======================================================
- *  Proyecto: Estación Meteorológica con ESP32
- *  Descripción: Mide temperatura, humedad, presión, luz, 
- *  velocidad del viento y calidad del aire. Publica datos
- *  a través de MQTT y los muestra en pantalla OLED.
+ *  Proyecto: Estación Meteorológica Local con WiFi (ESP32)
+ *  Descripción: Mide temperatura, humedad, presión, luz,
+ *  velocidad del viento y calidad del aire.
+ *  Muestra los datos en OLED, consola serial y los envía
+ *  por WiFi (HTTP o MQTT/ThingSpeak).
  *  Autor: [Tu Nombre]
- *  Fecha: [Actualizar Fecha Actual]
+ *  Fecha: [Actualizar]
  *  ======================================================
  */
 
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <BH1750.h>
 #include <DHT.h>
 #include <Adafruit_SSD1306.h>
 
-#include <WiFi.h>
-#include <ArduinoJson.h>
-#include <AsyncTCP.h>
-#include <AsyncMqttClient.h>
+// === Configuración WiFi ===
+const char* ssid = "TuSSID";
+const char* password = "TuPASSWORD";
 
-#include "../../config/config.h"
-#include "../../include/ESP32_Utils.hpp"
-#include "../../include/ESP32_Utils_MQTT_Async.hpp"
-#include "../../include/MQTT.hpp"
-#include "../../include/JsonBuilder.hpp"
+// URL del servidor o endpoint ThingSpeak (opcional)
+String serverName = "http://api.thingspeak.com/update";
+String apiKey = "TU_API_KEY";  // si usas ThingSpeak
 
-// Cliente MQTT principal
-AsyncMqttClient mqttClient;
-
-// === Definición de pines ===
+// === Pines ===
 #define DHTPIN 14
 #define DHTTYPE DHT11
 #define MQ2_AO 35
@@ -41,304 +38,171 @@ AsyncMqttClient mqttClient;
 #define ANEMO_PIN 17
 
 // === Configuración del anemómetro ===
-const int RecordTime = 3;              // Tiempo de muestreo (segundos)
-volatile int InterruptCounter = 0;     // Contador de interrupciones de viento
-float WindSpeed = 0.0;                 // Velocidad del viento en km/h
-const float ANEMO_FACTOR = 2.4;        // Factor de conversión a km/h
+const int RecordTime = 3;                // Tiempo de muestreo (s)
+volatile int InterruptCounter = 0;       // Contador de interrupciones
+volatile unsigned long lastPulse = 0;    // Tiempo del último pulso (µs)
+float WindSpeed = 0.0;                   // Velocidad del viento en km/h
+const float ANEMO_FACTOR = 2.4;          // Factor de conversión a km/h
 
-// === Sensores conectados ===
-Adafruit_BMP085 bmp;                   // Sensor de presión BMP180/BMP085
-BH1750 lightMeter;                     // Sensor de luz BH1750
-DHT dht(DHTPIN, DHTTYPE);              // Sensor de temperatura/humedad DHT11
+// === Sensores ===
+Adafruit_BMP085 bmp;
+BH1750 lightMeter;
+DHT dht(DHTPIN, DHTTYPE);
 
-// === Configuración de pantalla OLED ===
+// === Pantalla OLED ===
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// === Variables de control de interfaz ===
-int menuIndex = 5;                     // Índice actual del menú (por defecto resumen)
-unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 300;  // Antirrebote botones
-
-// === Configuración MQTT ===
-const unsigned long DEFAULT_MQTT_INTERVAL_MS = 60UL * 1000UL;  // 1 minuto
-unsigned long mqttPublishIntervalMs = DEFAULT_MQTT_INTERVAL_MS;
-unsigned long lastMqttPublish = 0;
-
-// === Datos de estación ===
-const char* WEATHER_TOPIC = MQTT_BASE_TOPIC "sensors/weather";
-const char* WEATHER_SENSOR_ID = "WS_001";
-const char* WEATHER_STREET_ID = "ST_1253";
-const double WEATHER_LATITUDE = 40.4094736;
-const double WEATHER_LONGITUDE = -3.6920903;
-const char* WEATHER_DISTRICT = "Centro";
-const char* WEATHER_NEIGHBORHOOD = "Universidad";
-
-// === Variables MQTT recibidas ===
-float mqttTemp = NAN, mqttHum = NAN, mqttPres = NAN, mqttLuz = NAN, mqttWindSpeed = NAN, mqttAirQualityIndex = NAN, mqttAltitude = NAN;
-String mqttTimestamp;
-unsigned long lastMqttDataUpdate = 0;
-
-// === Umbrales de calidad de aire ===
+// === MQ2 ===
 const int MQ2_umbral_base = 1400;
 const int MQ2_umbral_malo = 1700;
 const int MQ2_umbral_horrible = 1800;
 
-// === Prototipos de funciones ===
-void handleAlert(int estado);
-void showDHT_aux_MQTT();
-void showBMP_MQTT();
-void showBH1750_MQTT();
-void showAnemo_aux_MQTT();
-void showMQ2_aux_MQTT();
-void showResumen_MQTT();
-String getCalidadAire(int gasADC);
-void publicarSensor(const char* topic, const String& payload);
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total);
-bool updateMqttDataFromPayload(const String& payload);
-bool hasFreshMqttData(unsigned long maxAgeMs = 120000UL);
-String formatTimestampForDisplay(const String& isoTimestamp);
-void showSensorHeader(const char* title, bool hasData);
-void setLED(bool r, bool g, bool b);
+// === Prototipos ===
 void renderDisplay(void (*pageFunc)());
+void showResumen();
+String getCalidadAire(int gasADC);
+void measureWind();
+void sendToServer(float temp, float hum, float pres, float alt, float lux, float wind, int gasA, String calidad);
+void connectWiFi();
+void IRAM_ATTR countup();
 
 // =============================================================
-// === Lógica del anemómetro ===
+// === INTERRUPCIÓN: contar pulsos del anemómetro ===
 // =============================================================
+void IRAM_ATTR countup() {
+  unsigned long now = micros();
+  if (now - lastPulse > 5000) {  // antirrebote: ignora pulsos <5 ms
+    InterruptCounter++;
+    lastPulse = now;
+  }
+}
 
-// Interrupción para contar pulsos del sensor de viento
-void IRAM_ATTR countup() { InterruptCounter++; }
-
-// Calcula velocidad del viento promediando durante RecordTime segundos
+// =============================================================
+// === CÁLCULO DE VELOCIDAD DEL VIENTO ===
+// =============================================================
 void measureWind() {
   InterruptCounter = 0;
-  attachInterrupt(digitalPinToInterrupt(ANEMO_PIN), countup, RISING);
+  attachInterrupt(digitalPinToInterrupt(ANEMO_PIN), countup, FALLING);
   delay(RecordTime * 1000);
-  detachInterrupt(ANEMO_PIN);
+  detachInterrupt(digitalPinToInterrupt(ANEMO_PIN));
   WindSpeed = (float)InterruptCounter / (float)RecordTime * ANEMO_FACTOR;
 }
 
 // =============================================================
-// === SETUP: Inicialización de hardware y conexión ===
+// === SETUP ===
 // =============================================================
 void setup() {
   Serial.begin(115200);
-  Serial.println("Iniciando sistema...");
+  delay(1000);
+  Serial.println("🌦 Iniciando Estación Meteorológica Local con WiFi...");
+
   Wire.begin(21, 22);
 
-  // Inicialización de sensores
+  // --- Sensores ---
   dht.begin();
   lightMeter.begin();
-  bmp.begin();
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+  if (!bmp.begin()) {
+    Serial.println("❌ No se detecta BMP180/BMP085. Revisa conexiones.");
+    while (true);
+  }
+
+  // --- OLED ---
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("❌ No se pudo inicializar OLED.");
+    while (true);
+  }
+
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.println("Estacion con WiFi OK!");
+  display.display();
 
-  // Configuración de pines
+  // --- Pines ---
   pinMode(BUTTON_BACK, INPUT_PULLDOWN);
   pinMode(BUTTON_NEXT, INPUT_PULLDOWN);
-  pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_R, OUTPUT);
   pinMode(LED_G, OUTPUT);
   pinMode(LED_B, OUTPUT);
   pinMode(ANEMO_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
 
-  Serial.println("Sistema iniciado correctamente.");
+  // --- WiFi ---
+  connectWiFi();
 
-  // Inicialización WiFi + MQTT
-  WiFi.onEvent(WiFiEvent);
-  InitMqtt();
-  mqttClient.onMessage(onMqttMessage);
-  mqttClient.subscribe(WEATHER_TOPIC, 0);
-  ConnectWiFi_STA(true);
-  initTime();
-
-  // Mostrar pantalla inicial de resumen
-  renderDisplay(showResumen_MQTT);
+  Serial.println("✅ Sistema iniciado correctamente.");
 }
 
 // =============================================================
 // === LOOP PRINCIPAL ===
 // =============================================================
 void loop() {
-  unsigned long now = millis();
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
 
-  // Lectura de botones con antirrebote
-  bool backState = digitalRead(BUTTON_BACK);
-  bool nextState = digitalRead(BUTTON_NEXT);
+  float pres = bmp.readPressure() / 100.0;
+  float altitud = bmp.readAltitude();
+  float lux = lightMeter.readLightLevel();
+  int gasA = analogRead(MQ2_AO);
 
-  if (backState == HIGH && (now - lastDebounceTime) > debounceDelay) {
-    menuIndex = (menuIndex - 1 + 6) % 6;
-    lastDebounceTime = now;
-  }
-  if (nextState == HIGH && (now - lastDebounceTime) > debounceDelay) {
-    menuIndex = (menuIndex + 1) % 6;
-    lastDebounceTime = now;
-  }
+  measureWind();
+  String calidad = getCalidadAire(gasA);
 
-  // Publicar datos cada cierto intervalo
-  if (now - lastMqttPublish >= mqttPublishIntervalMs) {
-    lastMqttPublish = now;
+  // --- Mostrar en consola ---
+  Serial.println("===================================");
+  Serial.printf("🌡 Temp: %.1f °C\n", temp);
+  Serial.printf("💧 Humedad: %.1f %%\n", hum);
+  Serial.printf("🧭 Presion: %.1f hPa\n", pres);
+  Serial.printf("⛰ Altitud: %.1f m\n", altitud);
+  Serial.printf("☀️  Luz: %.1f lx\n", lux);
+  Serial.printf("🌬 Viento: %.1f km/h (%.2f m/s)\n", WindSpeed, WindSpeed / 3.6);
+  Serial.printf("🧪 MQ2: %d (%s)\n", gasA, calidad.c_str());
+  Serial.println("===================================");
 
-    // Lecturas de sensores
-    float temp = dht.readTemperature();
-    float hum = dht.readHumidity();
-    float pres = bmp.readPressure() / 100.0;
-    float lux = lightMeter.readLightLevel();
-    int gasA = analogRead(MQ2_AO);
-    measureWind();
-    float windSpeed = WindSpeed;
-    float altitud = bmp.readAltitude(1013.25);
+  renderDisplay(showResumen);
 
-    // Construcción del JSON y envío MQTT
-    String payload = buildWeatherStationJson(
-      WEATHER_SENSOR_ID, WEATHER_STREET_ID, WEATHER_LATITUDE, WEATHER_LONGITUDE,
-      altitud, WEATHER_DISTRICT, WEATHER_NEIGHBORHOOD,
-      temp, hum, windSpeed, lux, pres, static_cast<double>(gasA)
-    );
-    Serial.println(payload);
-    //publicarSensor(WEATHER_TOPIC, payload);
-    
-  }
+  // --- Enviar por WiFi ---
+  sendToServer(temp, hum, pres, altitud, lux, WindSpeed, gasA, calidad);
 
-  // Render de la pantalla OLED según menú seleccionado
-  switch (menuIndex) {
-    case 0: renderDisplay(showDHT_aux_MQTT); break;
-    case 1: renderDisplay(showBMP_MQTT); break;
-    case 2: renderDisplay(showBH1750_MQTT); break;
-    case 3: renderDisplay(showAnemo_aux_MQTT); break;
-    case 4: renderDisplay(showMQ2_aux_MQTT); break;
-    case 5: renderDisplay(showResumen_MQTT); break;
-  }
+  delay(10000); // cada 10 segundos
 }
 
 // =============================================================
-// === Funciones de visualización OLED ===
+// === FUNCIONES DE VISUALIZACIÓN OLED ===
 // =============================================================
-
-// Dibuja cabecera estándar para cada sensor
-void showSensorHeader(const char* title, bool hasData) {
-  display.setTextSize(2);
-  display.println(title);
+void showResumen() {
   display.setTextSize(1);
-  if (!hasData) display.println("Sin datos MQTT");
+  display.setCursor(0, 0);
+  display.println("== Estacion Local ==");
+
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  float pres = bmp.readPressure() / 100.0;
+  float altitud = bmp.readAltitude();
+  float lux = lightMeter.readLightLevel();
+  int gasA = analogRead(MQ2_AO);
+  String calidad = getCalidadAire(gasA);
+
+  display.printf("T: %.1f C  H: %.1f%%\n", temp, hum);
+  display.printf("Pres: %.1f hPa\n", pres);
+  display.printf("Alt: %.1f m\n", altitud);
+  display.printf("Luz: %.1f lx\n", lux);
+  display.printf("Viento: %.1f km/h\n", WindSpeed);
+  display.printf("Gas: %d (%s)\n", gasA, calidad.c_str());
 }
 
-// Muestra datos del sensor DHT11 (temperatura y humedad)
-void showDHT_aux_MQTT() {
-  bool hasData = !(isnan(mqttTemp) || isnan(mqttHum));
-  showSensorHeader("DHT11 (MQTT)", hasData);
-  if (hasData) {
-    display.printf("Temp: %.1f C\n", mqttTemp);
-    display.printf("Hum : %.1f %%", mqttHum);
-  }
-}
-
-// Muestra presión y altitud BMP180
-void showBMP_MQTT() {
-  bool hasData = !isnan(mqttPres);
-  showSensorHeader("BMP180 (MQTT)", hasData);
-  if (hasData) {
-    display.printf("Pres: %.1f hPa\n", mqttPres);
-    if (!isnan(mqttAltitude)) display.printf("Alt: %.0f m", mqttAltitude);
-  }
-}
-
-// Muestra intensidad de luz BH1750
-void showBH1750_MQTT() {
-  bool hasData = !isnan(mqttLuz);
-  showSensorHeader("BH1750 (MQTT)", hasData);
-  if (hasData) display.printf("Luz: %.1f lx", mqttLuz);
-}
-
-// Muestra velocidad del viento
-void showAnemo_aux_MQTT() {
-  bool hasData = !isnan(mqttWindSpeed);
-  showSensorHeader("Viento (MQTT)", hasData);
-  if (hasData) {
-    display.printf("km/h: %.1f\n", mqttWindSpeed);
-    display.printf("m/s: %.2f", mqttWindSpeed / 3.6);
-  }
-}
-
-// Muestra calidad del aire (sensor MQ2)
-void showMQ2_aux_MQTT() {
-  bool hasData = !isnan(mqttAirQualityIndex);
-  showSensorHeader("MQ2 (MQTT)", hasData);
-  if (hasData) {
-    display.printf("Indice: %.0f\n", mqttAirQualityIndex);
-    display.printf("Calidad: %s", getCalidadAire((int)mqttAirQualityIndex).c_str());
-  }
-}
-
-// Muestra resumen general de todos los sensores
-void showResumen_MQTT() {
-  display.setTextSize(1);
-  display.println("RESUMEN MQTT (5/5)");
-  display.println("--------------------");
-  if (!hasFreshMqttData()) {
-    display.println("Esperando datos MQTT...");
-    return;
-  }
-
-  display.printf("T: %.1f C | H: %.1f %%\n", mqttTemp, mqttHum);
-  display.printf("Pres: %.1f hPa\n", mqttPres);
-  display.printf("Luz : %.1f lx\n", mqttLuz);
-  display.printf("Viento: %.1f km/h\n", mqttWindSpeed);
-  if (isnan(mqttAirQualityIndex)) display.println("Gas: N/D");
-  else display.printf("Gas: %.0f (%s)\n", mqttAirQualityIndex, getCalidadAire((int)mqttAirQualityIndex).c_str());
-  if (!isnan(mqttAltitude)) display.printf("Alt: %.0f m\n", mqttAltitude);
-
-  display.println("--------------------");
-  if (!mqttTimestamp.isEmpty()) {
-    display.println("Ult. MQTT:");
-    display.println(formatTimestampForDisplay(mqttTimestamp));
-  }
-  display.printf("Hace: %lus\n", (millis() - lastMqttDataUpdate) / 1000UL);
+void renderDisplay(void (*pageFunc)()) {
+  display.clearDisplay();
+  pageFunc();
+  display.display();
 }
 
 // =============================================================
-// === Comunicación MQTT ===
+// === FUNCIÓN: CALIDAD DEL AIRE MQ2 ===
 // =============================================================
-
-// Callback cuando se recibe un mensaje MQTT
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties, size_t len, size_t, size_t) {
-  String msg;
-  for (unsigned int i = 0; i < len; i++) msg += (char)payload[i];
-  if (String(topic) != WEATHER_TOPIC) return;
-  updateMqttDataFromPayload(msg);
-}
-
-// Publica mensaje en el tópico MQTT
-void publicarSensor(const char* topic, const String& payload) {
-  mqttClient.publish(topic, 0, true, payload.c_str());
-}
-
-// Actualiza variables locales con datos recibidos por MQTT
-bool updateMqttDataFromPayload(const String& payload) {
-  StaticJsonDocument<1024> doc;
-  if (deserializeJson(doc, payload)) return false;
-  JsonVariantConst data = doc["data"];
-  if (data.isNull()) return false;
-
-  mqttTemp = data["temperature_celsius"] | NAN;
-  mqttHum = data["humidity_percentage"] | NAN;
-  mqttPres = data["atmospheric_pressure_hpa"] | NAN;
-  mqttLuz = data["luz"] | NAN;
-  mqttWindSpeed = data["wind_speed"] | NAN;
-  mqttAirQualityIndex = data["air_quality_index"] | NAN;
-  mqttAltitude = doc["location"]["altitude_meters"] | NAN;
-  mqttTimestamp = String(doc["timestamp"] | "");
-  lastMqttDataUpdate = millis();
-  return true;
-}
-
-// =============================================================
-// === Funciones auxiliares ===
-// =============================================================
-
-// Devuelve descripción textual de la calidad del aire según valor ADC
 String getCalidadAire(int gasADC) {
   if (gasADC > MQ2_umbral_horrible) return "PELIGROSA";
   if (gasADC > MQ2_umbral_malo) return "MALA";
@@ -346,42 +210,54 @@ String getCalidadAire(int gasADC) {
   return "BUENA";
 }
 
-// Indica si los datos MQTT siguen siendo recientes
-bool hasFreshMqttData(unsigned long maxAgeMs) {
-  return (lastMqttDataUpdate != 0 && millis() - lastMqttDataUpdate < maxAgeMs);
+// =============================================================
+// === FUNCIÓN: CONEXIÓN WiFi ===
+// =============================================================
+void connectWiFi() {
+  Serial.printf("🔌 Conectando a WiFi: %s\n", ssid);
+  WiFi.begin(ssid, password);
+  int retry = 0;
+  while (WiFi.status() != WL_CONNECTED && retry < 20) {
+    delay(500);
+    Serial.print(".");
+    retry++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ WiFi conectado!");
+    Serial.print("📶 IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\n❌ No se pudo conectar a WiFi.");
+  }
 }
 
-// Convierte timestamp ISO a formato legible
-String formatTimestampForDisplay(const String& isoTimestamp) {
-  if (isoTimestamp.length() < 19) return isoTimestamp;
-  return isoTimestamp.substring(0, 10) + " " + isoTimestamp.substring(11, 19);
-}
+// =============================================================
+// === FUNCIÓN: ENVÍO DE DATOS A SERVIDOR O THINGSPEAK ===
+// =============================================================
+void sendToServer(float temp, float hum, float pres, float alt, float lux, float wind, int gasA, String calidad) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
 
-// Control simplificado de LEDs RGB
-void setLED(bool r, bool g, bool b) {
-  digitalWrite(LED_R, r);
-  digitalWrite(LED_G, g);
-  digitalWrite(LED_B, b);
-}
+    String url = serverName + "?api_key=" + apiKey +
+                 "&field1=" + String(temp, 1) +
+                 "&field2=" + String(hum, 1) +
+                 "&field3=" + String(pres, 1) +
+                 "&field4=" + String(alt, 1) +
+                 "&field5=" + String(lux, 1) +
+                 "&field6=" + String(wind, 1) +
+                 "&field7=" + String(gasA) +
+                 "&field8=" + calidad;
 
-// Limpia pantalla, ejecuta función de render y actualiza
-void renderDisplay(void (*pageFunc)()) {
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  pageFunc();
-  display.display();
-}
+    http.begin(url);
+    int httpCode = http.GET();
 
-// Controla indicadores visuales y sonoros según nivel de alerta
-void handleAlert(int estado) {
-  if (estado == 0) {    // OK
-    setLED(false, true, false);
-    digitalWrite(BUZZER_PIN, LOW);
-  } else if (estado == 1) {   // PRE-ALERTA
-    setLED(true, true, false);
-    if ((millis() / 1000) % 20 == 0) tone(BUZZER_PIN, 1000, 200);
-  } else {    // ALERTA
-    setLED(true, false, false);
-    if ((millis() / 1000) % 5 == 0) tone(BUZZER_PIN, 2000, 300);
+    if (httpCode > 0) {
+      Serial.printf("📡 Datos enviados correctamente (%d)\n", httpCode);
+    } else {
+      Serial.printf("⚠️ Error enviando datos: %s\n", http.errorToString(httpCode).c_str());
+    }
+    http.end();
+  } else {
+    Serial.println("⚠️ WiFi no conectado, no se enviaron datos.");
   }
 }
